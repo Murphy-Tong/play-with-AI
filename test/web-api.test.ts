@@ -1,0 +1,170 @@
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { createServer, request } from 'node:http';
+import { test } from 'node:test';
+import type { TestContext } from 'node:test';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { createApp } from '../src/http.ts';
+import { RoomStore } from '../src/rooms.ts';
+import type { RoomView } from '../src/rooms.ts';
+import { sandboxGame } from '../src/games/sandbox.ts';
+
+const authToken = 'test-only-web-mcp-server-token-1234567890';
+type Created = ReturnType<RoomStore['createRoom']>;
+
+async function setup(t: TestContext, store = new RoomStore([sandboxGame]), webHosts: string[] = []) {
+  const server = createServer(createApp({ authToken, store, webHosts }));
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const base = `http://127.0.0.1:${address.port}`;
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  });
+  const post = (path: string, body: unknown, token?: string) => fetch(`${base}/api${path}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  });
+  const create = async () => {
+    const response = await post('/rooms', { gameId: 'sandbox', playerName: 'Human' });
+    assert.equal(response.status, 201);
+    return await response.json() as Created;
+  };
+  return { base, post, create };
+}
+
+async function assertError(response: Response, status: number, code: string) {
+  assert.equal(response.status, status);
+  assert.match(response.headers.get('content-type')!, /application\/json/);
+  assert.equal((await response.json()).error.code, code);
+}
+
+test('web games and MCP actions share the same room without exposing the server credential', async (t) => {
+  const { base, create, post } = await setup(t);
+  const games = await fetch(`${base}/api/games`);
+  assert.equal(games.status, 200);
+  assert.equal(games.headers.get('cache-control'), 'no-store');
+  assert.equal((await games.json()).games[0].id, 'sandbox');
+  const host = await create();
+  assert.equal(host.room.status, 'waiting');
+  assert.equal(JSON.stringify(host).includes(authToken), false);
+  const client = new Client({ name: 'web-integration-agent', version: '1.0.0' });
+  t.after(() => client.close());
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+    requestInit: { headers: { Authorization: `Bearer ${authToken}` } },
+  }));
+  const joined = await client.callTool({ name: 'join_room', arguments: {
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent',
+  } });
+  assert.notEqual(joined.isError, true);
+  const guest = joined.structuredContent as ReturnType<RoomStore['joinRoom']>;
+  const sent = await post(`/rooms/${host.room.id}/actions`, {
+    expectedVersion: 2, action: { type: 'message', text: 'Hello from the browser' },
+  }, host.playerToken);
+  assert.equal(sent.status, 200);
+  const action = await client.callTool({ name: 'submit_action', arguments: {
+    roomId: host.room.id, playerToken: guest.playerToken, expectedVersion: 3,
+    action: { type: 'message', text: 'Hello from MCP' },
+  } });
+  assert.notEqual(action.isError, true);
+  const response = await fetch(`${base}/api/rooms/${host.room.id}`, { headers: { Authorization: `Bearer ${host.playerToken}` } });
+  const room = await response.json() as RoomView;
+  assert.equal(room.version, 4);
+  assert.equal(room.selfPlayerId, host.room.selfPlayerId);
+  assert.deepEqual(room.state.messages, [
+    { playerId: host.room.selfPlayerId, text: 'Hello from the browser' },
+    { playerId: guest.room.selfPlayerId, text: 'Hello from MCP' },
+  ]);
+  assert.equal(JSON.stringify(room).includes(guest.playerToken), false);
+});
+
+test('web room access requires a private player token rather than an invitation or MCP credential', async (t) => {
+  const { base, create } = await setup(t);
+  const host = await create();
+  for (const token of ['', host.inviteToken, authToken]) {
+    await assertError(await fetch(`${base}/api/rooms/${host.room.id}`, { headers: { Authorization: `Bearer ${token}` } }), 401, 'UNAUTHORIZED');
+  }
+});
+
+test('web validation rejects blank names, extra fields, malformed ids and invalid actions', async (t) => {
+  const { base, create, post } = await setup(t);
+  for (const body of [
+    { gameId: 'sandbox', playerName: '  ' },
+    { gameId: 'sandbox', playerName: 'x'.repeat(41) },
+    { gameId: 'sandbox', playerName: 'Human', playerId: 'someone-else' },
+  ]) await assertError(await post('/rooms', body), 400, 'INVALID_INPUT');
+  await assertError(await fetch(`${base}/api/rooms/not-a-uuid`, { headers: { Authorization: 'Bearer test' } }), 400, 'INVALID_INPUT');
+  const host = await create();
+  await assertError(await post(`/rooms/${host.room.id}/actions`, {
+    expectedVersion: 1, action: { type: 'message', text: 'waiting' },
+  }, host.playerToken), 409, 'ROOM_NOT_READY');
+  const joined = await post(`/rooms/${host.room.id}/join`, { inviteToken: host.inviteToken, playerName: ' Guest ' });
+  assert.equal(joined.status, 200);
+  assert.equal((await joined.json()).room.players[1].name, 'Guest');
+  await assertError(await post(`/rooms/${host.room.id}/actions`, {
+    expectedVersion: 2, action: { type: 'message', text: ' ' },
+  }, host.playerToken), 400, 'INVALID_ACTION');
+  await assertError(await post(`/rooms/${host.room.id}/actions`, {
+    expectedVersion: 2, action: { type: 'message', text: 'hello' }, playerId: 'spoofed',
+  }, host.playerToken), 400, 'INVALID_INPUT');
+});
+
+test('web domain errors preserve actionable conflict and invitation codes', async (t) => {
+  const { base, create, post } = await setup(t);
+  await assertError(await post('/rooms', { gameId: 'missing', playerName: 'Host' }), 404, 'GAME_NOT_FOUND');
+  await assertError(await fetch(`${base}/api/rooms/11111111-1111-4111-8111-111111111111`, { headers: { Authorization: 'Bearer absent' } }), 404, 'ROOM_NOT_FOUND');
+  const host = await create();
+  await assertError(await post(`/rooms/${host.room.id}/join`, { inviteToken: 'wrong', playerName: 'Guest' }), 403, 'INVALID_INVITE');
+  await post(`/rooms/${host.room.id}/join`, { inviteToken: host.inviteToken, playerName: 'Guest' });
+  await assertError(await post(`/rooms/${host.room.id}/join`, { inviteToken: host.inviteToken, playerName: 'Third' }), 409, 'ROOM_FULL');
+  await assertError(await post(`/rooms/${host.room.id}/actions`, {
+    expectedVersion: 1, action: { type: 'message', text: 'stale' },
+  }, host.playerToken), 409, 'VERSION_CONFLICT');
+});
+
+test('web API rejects cross-origin requests without enabling CORS', async (t) => {
+  const { base } = await setup(t);
+  for (const headers of [{ Origin: 'https://untrusted.invalid' }, { Origin: 'null' }, { 'Sec-Fetch-Site': 'cross-site' }] as Record<string, string>[]) {
+    const response = await fetch(`${base}/api/rooms`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ gameId: 'sandbox', playerName: 'Intruder' }) });
+    assert.equal(response.headers.get('access-control-allow-origin'), null);
+    await assertError(response, 403, 'FORBIDDEN');
+  }
+});
+
+test('web API bounds bodies and always returns JSON for errors and missing routes', async (t) => {
+  const { base } = await setup(t);
+  await assertError(await fetch(`${base}/api/rooms`, { method: 'POST', body: '{}' }), 415, 'UNSUPPORTED_MEDIA_TYPE');
+  for (const [body, status, code] of [['{', 400, 'INVALID_INPUT'], [JSON.stringify({ data: 'x'.repeat(70_000) }), 413, 'PAYLOAD_TOO_LARGE']] as const) {
+    await assertError(await fetch(`${base}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }), status, code);
+  }
+  await assertError(await fetch(`${base}/api/missing`), 404, 'NOT_FOUND');
+});
+
+test('web API sanitizes unexpected adapter errors', async (t) => {
+  const store = new RoomStore([{ ...sandboxGame, initialState: () => { throw new Error('private-adapter-secret'); } }]);
+  const { post } = await setup(t, store);
+  const response = await post('/rooms', { gameId: 'sandbox', playerName: 'Host' });
+  assert.equal(response.status, 500);
+  const body = await response.text();
+  assert.equal(body.includes('private-adapter-secret'), false);
+  assert.equal(body.includes('node_modules'), false);
+  assert.equal(JSON.parse(body).error.code, 'INTERNAL_ERROR');
+});
+
+test('explicit LAN web hosts are accepted without expanding the MCP host boundary', async (t) => {
+  const { base } = await setup(t, undefined, ['192.0.2.5']);
+  const status = (path: string, host: string) => new Promise<number | undefined>((resolve, reject) => {
+    const req = request(`${base}${path}`, { headers: { Host: host, Authorization: `Bearer ${authToken}` } }, response => {
+      response.resume();
+      response.on('end', () => resolve(response.statusCode));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(await status('/api/games', '192.0.2.5:3001'), 200);
+  assert.equal(await status('/mcp', '192.0.2.5:3001'), 403);
+  assert.equal(await status('/api/games', 'untrusted.invalid'), 403);
+});
