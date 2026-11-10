@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { networkInterfaces } from 'node:os';

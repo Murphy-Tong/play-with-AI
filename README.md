@@ -22,7 +22,10 @@
 需要 Node.js 24 或更高版本。
 
 ```bash
-npx play-with-ai
+git clone https://github.com/Murphy-Tong/play-with-AI.git
+cd play-with-AI
+npm install
+npm run dev
 ```
 
 启动后会输出一段 JSON：
@@ -89,14 +92,14 @@ claude mcp add --transport http play-with-ai http://127.0.0.1:3001/mcp \
 
 `--lan` 只适合可信网络：同一网络下的其他人可以打开网页，但看不到 MCP token。
 
-## 本地开发
+## 开发与测试
 
 ```bash
-npm install
-npm run dev          # 开发模式，前端热更新
+npm run dev          # 开发模式，改动服务端自动重启，前端热更新
+npm run build        # 产出 dist/（服务端）和 dist/web（前端静态资源）
+npm start            # 以构建产物启动
 npm test             # 后端、Web API、MCP 与前端会话测试
 npm run typecheck    # 服务端与前端类型检查
-npm run build        # 产出 dist/（服务端）和 dist/web（前端静态资源）
 ```
 
 目录结构：
@@ -106,5 +109,5 @@ src/            服务端：HTTP、MCP、房间存储与游戏适配器
 src/games/      游戏规则（gomoku、sandbox）
 web/            Vue 3 前端：大厅、房间、棋盘、聊天
 test/           node:test 测试
-dist/           构建产物，npm 包只包含这里
+dist/           构建产物
 ```
