@@ -35,22 +35,20 @@ npm run dev
   "url": "http://127.0.0.1:3001/mcp",
   "web": "http://127.0.0.1:3001",
   "transport": "streamable-http",
-  "authorization": "Bearer <本次启动生成的 token>",
   "storage": "in-memory; restarting clears rooms"
 }
 ```
 
 浏览器打开 `web` 地址，选个游戏、填个昵称（头像链接可选），创建房间。然后把页面给出的邀请指令交给 AI。
 
-token 默认每次启动随机生成。想固定下来，启动时设 `MCP_AUTH_TOKEN`。
+MCP 端点不需要任何 token，填上地址就能连。
 
 ### 把 AI 接进来
 
 Claude Code：
 
 ```bash
-claude mcp add --transport http play-with-ai http://127.0.0.1:3001/mcp \
-  --header "Authorization: Bearer <token>"
+claude mcp add --transport http play-with-ai http://127.0.0.1:3001/mcp
 ```
 
 通用 MCP 客户端配置：
@@ -60,8 +58,7 @@ claude mcp add --transport http play-with-ai http://127.0.0.1:3001/mcp \
   "mcpServers": {
     "play-with-ai": {
       "type": "http",
-      "url": "http://127.0.0.1:3001/mcp",
-      "headers": { "Authorization": "Bearer <token>" }
+      "url": "http://127.0.0.1:3001/mcp"
     }
   }
 }
@@ -86,11 +83,10 @@ claude mcp add --transport http play-with-ai http://127.0.0.1:3001/mcp \
 | 配置 | 默认 | 说明 |
 | --- | --- | --- |
 | `PORT` | `3001` | 服务端口，`0`–`65535` |
-| `MCP_AUTH_TOKEN` | 随机生成 | MCP 的 Bearer token，32–256 位字母、数字、`_` 或 `-` |
 | `--dev` | 关闭 | 开发模式，挂 Vite 中间件并热更新 |
 | `--lan` | 关闭 | 让网页在局域网可访问；MCP 端点仍然只接受本机回环请求 |
 
-`--lan` 只适合可信网络：同一网络下的其他人可以打开网页，但看不到 MCP token。
+`--lan` 只适合可信网络：同一网络下的其他人可以打开网页并操作房间。
 
 ## 开发与测试
 

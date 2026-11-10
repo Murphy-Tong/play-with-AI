@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -11,11 +10,10 @@ import { sandboxGame } from './games/sandbox.ts';
 
 const config = z.object({
   PORT: z.string().regex(/^\d{1,5}$/).default('3001').transform(Number).pipe(z.number().max(65535)),
-  MCP_AUTH_TOKEN: z.string().min(32).max(256).regex(/^[A-Za-z0-9_-]+$/).optional(),
 }).safeParse(process.env);
 
 if (!config.success) {
-  console.error(`Invalid configuration: ${config.error.issues.map((issue) => issue.path.join('.')).join(', ')}. PORT must be 0–65535; MCP_AUTH_TOKEN must contain 32–256 letters, digits, underscores or hyphens.`);
+  console.error(`Invalid configuration: ${config.error.issues.map((issue) => issue.path.join('.')).join(', ')}. PORT must be 0–65535.`);
   process.exitCode = 1;
 } else {
   const development = process.argv.includes('--dev');
@@ -24,8 +22,7 @@ if (!config.success) {
     (entries ?? []).filter((entry) => entry.family === 'IPv4' && !entry.internal).map((entry) => entry.address),
   ) : [];
   const host = lan ? '0.0.0.0' : '127.0.0.1';
-  const authToken = config.data.MCP_AUTH_TOKEN ?? randomBytes(32).toString('base64url');
-  const app = createApp({ authToken, store: new RoomStore([gomokuGame, sandboxGame]), webHosts });
+  const app = createApp({ store: new RoomStore([gomokuGame, sandboxGame]), webHosts });
   const server = createServer(app);
   let closeVite: (() => Promise<void>) | undefined;
 
@@ -50,7 +47,6 @@ if (!config.success) {
         web: `http://127.0.0.1:${address.port}`,
         ...(lan ? { lan: webHosts.map((ip) => `http://${ip}:${address.port}`), notice: 'Web UI is available on your LAN. Use only a trusted network; MCP remains loopback-only.' } : {}),
         transport: 'streamable-http',
-        authorization: config.data.MCP_AUTH_TOKEN ? 'Bearer <MCP_AUTH_TOKEN>' : `Bearer ${authToken}`,
         storage: 'in-memory; restarting clears rooms',
       }));
     }

@@ -12,8 +12,6 @@ import { sandboxGame } from '../src/games/sandbox.ts';
 import { gomokuGame } from '../src/games/gomoku.ts';
 import type { GameDefinition } from '../src/game.ts';
 
-const authToken = 'test-only-server-token-not-a-real-secret-123456';
-
 const finishGame: GameDefinition = {
   id: 'finish-test', title: 'Finish test', description: 'Fixture',
   minPlayers: 2, maxPlayers: 2,
@@ -25,7 +23,7 @@ const finishGame: GameDefinition = {
 };
 
 async function setup(t: TestContext, store = new RoomStore([sandboxGame, gomokuGame])) {
-  const server = createServer(createApp({ authToken, store }));
+  const server = createServer(createApp({ store }));
   const clients: Client[] = [];
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -42,9 +40,7 @@ async function setup(t: TestContext, store = new RoomStore([sandboxGame, gomokuG
     async connect() {
       const client = new Client({ name: 'integration-test', version: '1.0.0' });
       clients.push(client);
-      await client.connect(new StreamableHTTPClientTransport(url, {
-        requestInit: { headers: { Authorization: `Bearer ${authToken}` } },
-      }));
+      await client.connect(new StreamableHTTPClientTransport(url));
       return client;
     },
   };
@@ -208,16 +204,11 @@ test('internal adapter exceptions are not exposed to an MCP client', async (t) =
   assert.equal(JSON.stringify(result).includes('private-server-secret'), false);
 });
 
-test('HTTP rejects unauthenticated requests and untrusted browser origins', async (t) => {
+test('HTTP serves MCP without credentials but rejects untrusted browser origins', async (t) => {
   const { url } = await setup(t);
-  const unauthorizedHeaders: Record<string, string>[] = [{}, { Authorization: 'Bearer wrong' }];
-  for (const headers of unauthorizedHeaders) {
-    const response = await fetch(url, { method: 'POST', headers });
-    assert.equal(response.status, 401);
-  }
   const response = await fetch(url, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${authToken}`, Origin: 'https://untrusted.invalid' },
+    headers: { Origin: 'https://untrusted.invalid' },
   });
   assert.equal(response.status, 403);
 });
@@ -226,7 +217,7 @@ test('HTTP rejects DNS rebinding host headers', async (t) => {
   const { url } = await setup(t);
   const status = await new Promise<number | undefined>((resolve, reject) => {
     const req = request(url, {
-      method: 'POST', headers: { Authorization: `Bearer ${authToken}`, Host: 'untrusted.invalid' },
+      method: 'POST', headers: { Host: 'untrusted.invalid' },
     }, (response) => {
       response.resume();
       response.on('end', () => resolve(response.statusCode));
@@ -240,7 +231,7 @@ test('HTTP rejects DNS rebinding host headers', async (t) => {
 test('HTTP rejects unsupported methods without advertising a persistent SSE stream', async (t) => {
   const { url } = await setup(t);
   for (const method of ['GET', 'DELETE', 'PUT']) {
-    const response = await fetch(url, { method, headers: { Authorization: `Bearer ${authToken}` } });
+    const response = await fetch(url, { method });
     assert.equal(response.status, 405);
     assert.equal(response.headers.get('allow'), 'POST');
   }
@@ -251,7 +242,7 @@ test('HTTP returns bounded JSON errors for malformed and oversized requests', as
   for (const [body, status] of [['{', 400], [JSON.stringify({ data: 'x'.repeat(70_000) }), 413]] as const) {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body,
     });
     assert.equal(response.status, status);

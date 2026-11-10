@@ -12,11 +12,10 @@ import type { RoomView } from '../src/rooms.ts';
 import { sandboxGame } from '../src/games/sandbox.ts';
 import type { GameDefinition } from '../src/game.ts';
 
-const authToken = 'test-only-web-mcp-server-token-1234567890';
 type Created = ReturnType<RoomStore['createRoom']>;
 
 async function setup(t: TestContext, store = new RoomStore([sandboxGame]), webHosts: string[] = []) {
-  const server = createServer(createApp({ authToken, store, webHosts }));
+  const server = createServer(createApp({ store, webHosts }));
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
@@ -44,7 +43,7 @@ async function assertError(response: Response, status: number, code: string) {
   assert.equal((await response.json()).error.code, code);
 }
 
-test('web games and MCP chat share the same room without exposing the server credential', async (t) => {
+test('web games and MCP chat share the same room', async (t) => {
   const { base, create, post } = await setup(t);
   const games = await fetch(`${base}/api/games`);
   assert.equal(games.status, 200);
@@ -52,12 +51,9 @@ test('web games and MCP chat share the same room without exposing the server cre
   assert.equal((await games.json()).games[0].id, 'sandbox');
   const host = await create();
   assert.equal(host.room.status, 'waiting');
-  assert.equal(JSON.stringify(host).includes(authToken), false);
   const client = new Client({ name: 'web-integration-agent', version: '1.0.0' });
   t.after(() => client.close());
-  await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
-    requestInit: { headers: { Authorization: `Bearer ${authToken}` } },
-  }));
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
   const joined = await client.callTool({ name: 'join_room', arguments: {
     roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent',
   } });
@@ -82,9 +78,7 @@ test('web and MCP chat share the same room and never change the game version', a
   const host = await create();
   const client = new Client({ name: 'chat-agent', version: '1.0.0' });
   t.after(() => client.close());
-  await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
-    requestInit: { headers: { Authorization: `Bearer ${authToken}` } },
-  }));
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
   const joined = await client.callTool({ name: 'join_room', arguments: {
     roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent',
   } });
@@ -153,10 +147,10 @@ test('web rematch is rejected before finish and works after both votes', async (
   assert.equal(restarted.state.restarted, true);
 });
 
-test('web room access requires a private player token rather than an invitation or MCP credential', async (t) => {
+test('web room access requires a private player token rather than an invitation', async (t) => {
   const { base, create } = await setup(t);
   const host = await create();
-  for (const token of ['', host.inviteToken, authToken]) {
+  for (const token of ['', host.inviteToken, 'not-a-player-token']) {
     await assertError(await fetch(`${base}/api/rooms/${host.room.id}`, { headers: { Authorization: `Bearer ${token}` } }), 401, 'UNAUTHORIZED');
   }
 });
@@ -229,7 +223,7 @@ test('web API sanitizes unexpected adapter errors', async (t) => {
 test('explicit LAN web hosts are accepted without expanding the MCP host boundary', async (t) => {
   const { base } = await setup(t, undefined, ['192.0.2.5']);
   const status = (path: string, host: string) => new Promise<number | undefined>((resolve, reject) => {
-    const req = request(`${base}${path}`, { headers: { Host: host, Authorization: `Bearer ${authToken}` } }, response => {
+    const req = request(`${base}${path}`, { headers: { Host: host } }, response => {
       response.resume();
       response.on('end', () => resolve(response.statusCode));
     });

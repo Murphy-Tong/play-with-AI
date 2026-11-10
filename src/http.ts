@@ -1,4 +1,3 @@
-import { timingSafeEqual } from 'node:crypto';
 import express from 'express';
 import type { ErrorRequestHandler } from 'express';
 import { hostHeaderValidation, localhostHostValidation } from '@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js';
@@ -11,9 +10,8 @@ function isLoopback(address: string | undefined) {
   return address === '127.0.0.1' || address === '::1' || address?.startsWith('::ffff:127.') === true;
 }
 
-export function createApp(options: { authToken: string; store: RoomStore; webHosts?: string[] }) {
+export function createApp(options: { store: RoomStore; webHosts?: string[] }) {
   const app = express();
-  const expectedAuthorization = Buffer.from(`Bearer ${options.authToken}`);
   app.disable('x-powered-by');
   app.use(hostHeaderValidation([...new Set(['localhost', '127.0.0.1', '[::1]', ...(options.webHosts ?? [])])]));
   app.use('/api', createWebApi(options.store));
@@ -24,12 +22,6 @@ export function createApp(options: { authToken: string; store: RoomStore; webHos
     }
     if (req.headers.origin !== undefined) {
       res.status(403).json({ error: 'Browser origins are not supported by this local agent endpoint.' });
-      return;
-    }
-    const authorization = Buffer.from(req.headers.authorization ?? '');
-    if (authorization.length !== expectedAuthorization.length || !timingSafeEqual(authorization, expectedAuthorization)) {
-      res.setHeader('WWW-Authenticate', 'Bearer');
-      res.status(401).json({ error: 'A valid MCP server bearer token is required.' });
       return;
     }
     next();
