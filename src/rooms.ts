@@ -5,11 +5,22 @@ import type { GameDefinition, JsonObject, Player } from './game.ts';
 
 export const CHAT_LIMIT = 200;
 export const CHAT_TEXT_LIMIT = 500;
+export const IMAGE_DROP_LIMIT = 20;
+export const IMAGE_URL_LIMIT = 2048;
+export const IMAGE_CAPTION_LIMIT = 80;
 
 export type ChatMessage = {
   id: string;
   playerId: string;
   text: string;
+  at: string;
+};
+
+export type ImageDrop = {
+  id: string;
+  playerId: string;
+  url: string;
+  caption?: string;
   at: string;
 };
 
@@ -23,6 +34,7 @@ export type RoomView = {
   selfPlayerId: string;
   state: JsonObject;
   chat: ChatMessage[];
+  imageDrops: ImageDrop[];
   rematchVotes: string[];
 };
 
@@ -37,6 +49,7 @@ type Room = {
   inviteToken: string;
   state: JsonObject;
   chat: ChatMessage[];
+  imageDrops: ImageDrop[];
   rematchVotes: Set<string>;
 };
 
@@ -45,6 +58,20 @@ type PlayerAccess = { roomId: string; playerToken: string };
 function normalizeAvatar(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function normalizeImageUrl(value: string): string {
+  const trimmed = value.trim();
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new RoomError('INVALID_IMAGE', 'Image drops need a public http(s) image URL.');
+  }
+  if (!trimmed || trimmed.length > IMAGE_URL_LIMIT || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
+    throw new RoomError('INVALID_IMAGE', 'Image drops need a public http(s) image URL.');
+  }
+  return trimmed;
 }
 
 export class RoomStore {
@@ -87,6 +114,7 @@ export class RoomStore {
       inviteToken: randomBytes(32).toString('base64url'),
       state: game.initialState([player]),
       chat: [],
+      imageDrops: [],
       rematchVotes: new Set(),
     };
     const view = this.view(room, player.id);
@@ -176,6 +204,23 @@ export class RoomStore {
     return view;
   }
 
+  sendImage(input: PlayerAccess & { imageUrl: string; caption?: string }): RoomView {
+    const { room, playerId } = this.authenticate(input);
+    const url = normalizeImageUrl(input.imageUrl);
+    const caption = input.caption?.trim();
+    if (caption && caption.length > IMAGE_CAPTION_LIMIT) {
+      throw new RoomError('INVALID_IMAGE', `Image captions are limited to ${IMAGE_CAPTION_LIMIT} characters.`);
+    }
+    const imageDrops = [
+      ...room.imageDrops,
+      { id: randomUUID(), playerId, url, ...(caption ? { caption } : {}), at: new Date().toISOString() },
+    ].slice(-IMAGE_DROP_LIMIT);
+    const nextRoom: Room = { ...room, imageDrops, revision: room.revision + 1 };
+    const view = this.view(nextRoom, playerId);
+    this.rooms.set(room.id, nextRoom);
+    return view;
+  }
+
   requestRematch(input: PlayerAccess): RoomView {
     const { room, playerId } = this.authenticate(input);
     if (room.status !== 'finished') {
@@ -225,6 +270,7 @@ export class RoomStore {
       players: structuredClone(room.players),
       selfPlayerId: playerId,
       chat: structuredClone(room.chat),
+      imageDrops: structuredClone(room.imageDrops),
       rematchVotes: [...room.rematchVotes],
       state: structuredClone(room.game.getPlayerView(structuredClone(room.state), {
         playerId,

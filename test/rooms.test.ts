@@ -265,6 +265,43 @@ test('action history stays bounded while accepting later messages', () => {
   assert.deepEqual(messages.at(-1), { playerId: host.room.selfPlayerId, text: 'message 54' });
 });
 
+test('image drops are authenticated, validated, bounded, and do not change the game version', () => {
+  const { store, host } = setup();
+  const guest = join(store, host);
+  const input = {
+    roomId: host.room.id, playerToken: guest.playerToken,
+    imageUrl: '  https://example.test/boom.png  ', caption: '  看招  ',
+  };
+  const view = store.sendImage(input);
+  assert.equal(view.version, 2);
+  assert.equal(view.revision, 3);
+  assert.equal(view.imageDrops.length, 1);
+  const drop = view.imageDrops[0]!;
+  assert.equal(drop.playerId, guest.room.selfPlayerId);
+  assert.equal(drop.url, 'https://example.test/boom.png');
+  assert.equal(drop.caption, '看招');
+  const emptyCaption = store.sendImage({ ...input, caption: '   ' });
+  assert.equal('caption' in emptyCaption.imageDrops[1]!, false);
+
+  const clone = store.getRoom(input);
+  clone.imageDrops[0]!.url = 'https://changed.test/x.png';
+  assert.equal(store.getRoom(input).imageDrops[0]!.url, 'https://example.test/boom.png');
+
+  for (const imageUrl of ['', 'ftp://example.test/a.png', 'javascript:alert(1)', `https://example.test/${'x'.repeat(2048)}`]) {
+    assert.throws(() => store.sendImage({ ...input, imageUrl }), { code: 'INVALID_IMAGE' });
+  }
+  assert.throws(() => store.sendImage({ ...input, caption: 'x'.repeat(81) }), { code: 'INVALID_IMAGE' });
+  assert.throws(() => store.sendImage({ ...input, playerToken: host.inviteToken }), { code: 'UNAUTHORIZED' });
+
+  for (let i = 0; i < 25; i += 1) {
+    store.sendImage({ ...input, imageUrl: `https://example.test/${i}.png` });
+  }
+  const drops = store.getRoom(input).imageDrops;
+  assert.equal(drops.length, 20);
+  assert.equal(drops.at(-1)!.url, 'https://example.test/24.png');
+  assert.equal(store.getRoom(input).version, 2);
+});
+
 test('sandbox is chat-only and cannot accept game actions', () => {
   const store = new RoomStore([sandboxGame]);
   const host = store.createRoom({ gameId: 'sandbox', playerName: 'Human' });

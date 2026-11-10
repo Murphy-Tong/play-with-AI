@@ -9,6 +9,7 @@ export type RoomErrorCode =
   | 'VERSION_CONFLICT'
   | 'INVALID_ACTION'
   | 'INVALID_MESSAGE'
+  | 'INVALID_IMAGE'
   | 'ROOM_NOT_FINISHED';
 
 export class RoomError extends Error {

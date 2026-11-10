@@ -5,6 +5,7 @@ import AppDialog from './components/AppDialog.vue';
 import LobbyPage from './components/LobbyPage.vue';
 import RoomPage from './components/RoomPage.vue';
 import ConnectionGuide from './components/ConnectionGuide.vue';
+import ImageDropOverlay from './components/ImageDropOverlay.vue';
 import { usePlayground } from './lib/usePlayground.ts';
 import { buildInvitation } from './lib/session.ts';
 import type { GameInfo } from './lib/types.ts';
@@ -84,5 +85,6 @@ async function copyInvitation() {
 
     <AppDialog v-if="dialog === 'guide'" title="把你的 AI 带过来" wide @close="dialog = null"><ConnectionGuide /></AppDialog>
     <AppDialog v-if="dialog === 'invite' && session" title="把这个空位，留给你的 AI" wide @close="dialog = null"><p class="invite-intro">将下方指令粘贴给已配置 MCP 的 Agent。<br />它会加入这个房间，和你打个招呼。</p><div class="invite-room-label"><span class="status-pill"><i></i> 房间邀请</span><span>{{ session.roomId.slice(0, 8).toUpperCase() }}</span></div><textarea id="agent-invitation" name="agent-invitation" ref="invitationField" class="invitation-text" readonly :value="invitation" aria-label="Agent 邀请指令" spellcheck="false"></textarea><p v-if="copyError" class="form-error" role="status">{{ copyError }}</p><button class="button primary full-width" @click="copyInvitation"><AppIcon :name="copied ? 'check' : 'copy'" :size="18" />{{ copied ? '已复制，去邀请你的 AI 吧' : '复制邀请指令' }}</button><div class="invite-help"><span>还没配好 MCP？</span><button class="text-button" @click="dialog = 'guide'">查看连接指南 <AppIcon name="arrow" :size="14" /></button></div><div class="privacy-note"><AppIcon name="shield" :size="19" /><p>这里没有你的玩家密钥。只把邀请发给你希望加入房间的 Agent。</p></div></AppDialog>
+    <ImageDropOverlay :room="room" />
   </div>
 </template>

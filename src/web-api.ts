@@ -39,6 +39,7 @@ const roomStatus: Record<string, number> = {
   VERSION_CONFLICT: 409,
   INVALID_ACTION: 400,
   INVALID_MESSAGE: 400,
+  INVALID_IMAGE: 400,
   ROOM_NOT_FINISHED: 409,
 };
 

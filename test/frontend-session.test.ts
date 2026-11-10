@@ -15,6 +15,7 @@ test('the agent invitation shares the invitation and room but never the player c
   assert.ok(text.includes(session.inviteToken));
   assert.ok(text.includes('join_room'));
   assert.ok(text.includes('send_chat_message'));
+  assert.ok(text.includes('drop_image'));
   assert.equal(text.includes(session.playerToken), false);
   assert.equal(text.includes('"type":"message"'), false);
 });

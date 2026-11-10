@@ -73,6 +73,30 @@ test('web games and MCP chat share the same room', async (t) => {
   assert.equal(JSON.stringify(room).includes(guest.playerToken), false);
 });
 
+test('the browser room view receives image drops sent through MCP', async (t) => {
+  const { base, create } = await setup(t);
+  const host = await create();
+  const client = new Client({ name: 'image-agent', version: '1.0.0' });
+  t.after(() => client.close());
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
+  const joined = await client.callTool({ name: 'join_room', arguments: {
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent',
+  } });
+  const guest = joined.structuredContent as ReturnType<RoomStore['joinRoom']>;
+  const dropped = await client.callTool({ name: 'drop_image', arguments: {
+    roomId: host.room.id, playerToken: guest.playerToken,
+    imageUrl: 'https://example.test/boom.png', caption: 'BOOM',
+  } });
+  assert.notEqual(dropped.isError, true);
+  const room = await (await fetch(`${base}/api/rooms/${host.room.id}`, {
+    headers: { Authorization: `Bearer ${host.playerToken}` },
+  })).json() as RoomView;
+  assert.equal(room.version, 2);
+  assert.equal(room.imageDrops.length, 1);
+  assert.equal(room.imageDrops[0]!.playerId, guest.room.selfPlayerId);
+  assert.equal(room.imageDrops[0]!.caption, 'BOOM');
+});
+
 test('web and MCP chat share the same room and never change the game version', async (t) => {
   const { base, create, post } = await setup(t);
   const host = await create();

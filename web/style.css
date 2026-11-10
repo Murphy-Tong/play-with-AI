@@ -213,4 +213,50 @@ button svg { flex: 0 0 auto; }
   .gomoku-room { padding-inline: 10px; }
   .gomoku-player-name strong { max-width: 96px; }
 }
+.image-drop-overlay { position: fixed; inset: 0; z-index: 60; overflow: hidden; pointer-events: none; }
+.image-drop-scene { position: absolute; inset: -14px; display: grid; place-items: center; isolation: isolate; }
+.image-drop-scene::before { content: ''; position: absolute; inset: 0; background: #22301f; opacity: 0; }
+.image-drop-scene.is-impacting { animation: image-drop-shake .5s cubic-bezier(.36, .07, .19, .97) both; }
+.image-drop-scene.is-impacting::before { animation: image-drop-dim .7s ease-out both; }
+.image-drop-sticker { position: relative; z-index: 2; margin: 0; max-width: min(74vw, 560px); max-height: 64vh; filter: drop-shadow(0 18px 30px #22301f3d); }
+.image-drop-sticker.is-loading { opacity: 0; }
+.image-drop-sticker.is-falling { animation: image-drop-fall .62s cubic-bezier(.22, .68, .24, 1) both; }
+.image-drop-sticker.is-impact { animation: image-drop-settle .5s cubic-bezier(.22, 1.35, .36, 1) both; }
+.image-drop-sticker.is-leaving { animation: image-drop-leave .42s ease-in both; }
+.image-drop-sticker img { display: block; width: auto; height: auto; max-width: min(74vw, 560px); max-height: 56vh; border: 5px solid #fffefa; border-radius: 16px; background: #fffefa; box-shadow: 0 4px 0 #d8dfcb, 0 24px 64px #1c2c2047; }
+.image-drop-caption { position: absolute; left: 50%; bottom: -14px; transform: translateX(-50%); max-width: min(70vw, 500px); padding: 7px 13px; border-radius: 999px; background: #315842f2; color: #f4f8e8; font-size: 12px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 6px 18px #1c2c2033; }
+.impact-flash { position: absolute; inset: 0; z-index: 0; background: radial-gradient(circle at 50% 50%, #fffdf0e6 0%, #e9f2c899 16%, transparent 56%); animation: image-drop-flash .5s ease-out both; }
+.impact-ring { position: absolute; z-index: 1; width: 30vmin; aspect-ratio: 1; border: 2px solid #c9da9e; border-radius: 50%; animation: image-drop-ring .65s cubic-bezier(.2, .8, .3, 1) both; }
+.impact-shard { position: absolute; z-index: 1; width: 5px; height: 22px; border-radius: 4px; background: #d5e3ae; animation: image-drop-shard .6s cubic-bezier(.2, .8, .3, 1) both; }
+@keyframes image-drop-fall {
+  0% { transform: translate3d(0, -120vh, 0) rotate(-9deg) scale(.68); opacity: 0; }
+  10% { opacity: 1; }
+  68% { transform: translate3d(0, 4vh, 0) rotate(2deg) scale(1.04); opacity: 1; }
+  84% { transform: translate3d(0, -1vh, 0) rotate(-.6deg) scale(.995); }
+  100% { transform: translate3d(0, 0, 0) rotate(0) scale(1); opacity: 1; }
+}
+@keyframes image-drop-settle {
+  0% { transform: scale(1.05, .9); }
+  35% { transform: scale(.985, 1.02); }
+  65% { transform: scale(1.008, .995); }
+  100% { transform: scale(1); }
+}
+@keyframes image-drop-leave {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: translate3d(0, 20vh, 0) rotate(4deg) scale(.82); opacity: 0; }
+}
+@keyframes image-drop-shake {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  12% { transform: translate3d(-7px, 4px, 0) rotate(-.25deg); }
+  24% { transform: translate3d(6px, -3px, 0) rotate(.22deg); }
+  38% { transform: translate3d(-5px, 2px, 0) rotate(-.16deg); }
+  54% { transform: translate3d(4px, -2px, 0) rotate(.12deg); }
+  72% { transform: translate3d(-2px, 1px, 0); }
+  88% { transform: translate3d(1px, 0, 0); }
+}
+@keyframes image-drop-dim { 0% { opacity: 0; } 15% { opacity: .16; } 100% { opacity: 0; } }
+@keyframes image-drop-flash { 0% { opacity: 0; } 12% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes image-drop-ring { 0% { transform: scale(.2); opacity: .9; } 100% { transform: scale(2.4); opacity: 0; } }
+@keyframes image-drop-shard { 0% { opacity: .9; transform: rotate(var(--shard-angle, 0deg)) translateY(-30px) scaleY(.5); } 100% { opacity: 0; transform: rotate(var(--shard-angle, 0deg)) translateY(-42vh) scaleY(1.15); } }
+@media (max-width: 700px) { .image-drop-sticker img { max-width: 82vw; max-height: 50vh; border-width: 4px; border-radius: 13px; } .image-drop-caption { font-size: 11px; padding: 6px 11px; bottom: -12px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }

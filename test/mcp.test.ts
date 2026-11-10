@@ -66,7 +66,7 @@ test('MCP advertises discoverable game schemas and the room tools', async (t) =>
   const client = await connect();
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
-    'create_room', 'get_room', 'join_room', 'list_games',
+    'create_room', 'drop_image', 'get_room', 'join_room', 'list_games',
     'request_rematch', 'send_chat_message', 'submit_action',
   ]);
   assert.equal(tools.tools.find((tool) => tool.name === 'get_room')?.annotations?.readOnlyHint, true);
@@ -146,6 +146,36 @@ test('MCP rematch requires both players and restarts the game', async (t) => {
   });
   assert.equal(restarted.status, 'active');
   assert.equal(restarted.state.restarted, true);
+});
+
+test('MCP image drops are room-level and visible in the shared view', async (t) => {
+  const { connect } = await setup(t);
+  const human = await connect();
+  const agent = await connect();
+  const host = await call<ReturnType<RoomStore['createRoom']>>(human, 'create_room', {
+    gameId: 'sandbox', playerName: 'Human',
+  });
+  const guest = await call<ReturnType<RoomStore['joinRoom']>>(agent, 'join_room', {
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent',
+  });
+  const dropped = await call<ReturnType<RoomStore['sendImage']>>(agent, 'drop_image', {
+    roomId: host.room.id, playerToken: guest.playerToken,
+    imageUrl: 'https://example.test/boom.png', caption: ' 看招 ',
+  });
+  assert.equal(dropped.version, 2);
+  assert.equal(dropped.imageDrops.length, 1);
+  assert.equal(dropped.imageDrops[0]!.playerId, guest.room.selfPlayerId);
+  assert.equal(dropped.imageDrops[0]!.url, 'https://example.test/boom.png');
+  assert.equal(dropped.imageDrops[0]!.caption, '看招');
+  const updated = await call<ReturnType<RoomStore['getRoom']>>(human, 'get_room', {
+    roomId: host.room.id, playerToken: host.playerToken,
+  });
+  assert.equal(updated.version, 2);
+  assert.equal(updated.imageDrops[0]!.id, dropped.imageDrops[0]!.id);
+  assert.equal(JSON.stringify(updated).includes(guest.playerToken), false);
+  await expectError(agent, 'drop_image', {
+    roomId: host.room.id, playerToken: guest.playerToken, imageUrl: 'javascript:alert(1)',
+  }, 'INVALID_IMAGE');
 });
 
 test('MCP domain errors are structured and stale actions cannot be replayed', async (t) => {

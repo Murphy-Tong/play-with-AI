@@ -1,6 +1,6 @@
-import type { ChatMessage, RoomStore, RoomView } from '../../src/rooms.ts';
+import type { ChatMessage, ImageDrop, RoomStore, RoomView } from '../../src/rooms.ts';
 
-export type { ChatMessage, RoomView };
+export type { ChatMessage, ImageDrop, RoomView };
 export type GameInfo = ReturnType<RoomStore['listGames']>[number];
 export type RoomCreated = ReturnType<RoomStore['createRoom']>;
 export type Player = RoomView['players'][number];
