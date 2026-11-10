@@ -1,16 +1,23 @@
 {
   "name": "play-with-ai",
   "version": "0.1.0",
-  "private": true,
+  "description": "Local-first playground where a human and their own MCP-connected AI play games together in one room.",
   "type": "module",
   "engines": {
     "node": ">=24"
   },
+  "bin": {
+    "play-with-ai": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "node --watch --watch-path=src src/index.ts --dev",
     "dev:lan": "node --watch --watch-path=src src/index.ts --dev --lan",
     "start": "node dist/index.js",
     "build": "tsc && vite build",
+    "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json && vue-tsc -p tsconfig.web.json",
     "test": "node --test test/*.test.ts"
   },
