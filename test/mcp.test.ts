@@ -67,7 +67,7 @@ test('MCP advertises discoverable game schemas and the room tools', async (t) =>
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
     'create_room', 'drop_image', 'get_room', 'join_room', 'list_games',
-    'request_rematch', 'send_chat_message', 'submit_action',
+    'request_rematch', 'send_chat_message', 'submit_action', 'wait_for_room_update',
   ]);
   assert.equal(tools.tools.find((tool) => tool.name === 'get_room')?.annotations?.readOnlyHint, true);
   const { games } = await call<{ games: { id: string; actionSchema: { required: string[] } | null }[] }>(client, 'list_games');
@@ -176,6 +176,35 @@ test('MCP image drops are room-level and visible in the shared view', async (t) 
   await expectError(agent, 'drop_image', {
     roomId: host.room.id, playerToken: guest.playerToken, imageUrl: 'javascript:alert(1)',
   }, 'INVALID_IMAGE');
+});
+
+test('MCP wait_for_room_update returns on the next change and honors its timeout', async (t) => {
+  const { connect } = await setup(t);
+  const human = await connect();
+  const agent = await connect();
+  const host = await call<ReturnType<RoomStore['createRoom']>>(human, 'create_room', {
+    gameId: 'sandbox', playerName: 'Human',
+  });
+  const guest = await call<ReturnType<RoomStore['joinRoom']>>(agent, 'join_room', {
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent',
+  });
+  const current = await call<ReturnType<RoomStore['getRoom']>>(agent, 'get_room', {
+    roomId: host.room.id, playerToken: guest.playerToken,
+  });
+  const waiting = call<ReturnType<RoomStore['getRoom']>>(agent, 'wait_for_room_update', {
+    roomId: host.room.id, playerToken: guest.playerToken, afterRevision: current.revision, timeoutSeconds: 5,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await call(human, 'send_chat_message', {
+    roomId: host.room.id, playerToken: host.playerToken, text: 'your turn',
+  });
+  const woke = await waiting;
+  assert.equal(woke.revision, current.revision + 1);
+  assert.equal(woke.chat.at(-1)?.text, 'your turn');
+  const timedOut = await call<ReturnType<RoomStore['getRoom']>>(agent, 'wait_for_room_update', {
+    roomId: host.room.id, playerToken: guest.playerToken, afterRevision: woke.revision, timeoutSeconds: 1,
+  });
+  assert.equal(timedOut.revision, woke.revision);
 });
 
 test('MCP domain errors are structured and stale actions cannot be replayed', async (t) => {

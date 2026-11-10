@@ -74,6 +74,7 @@ claude mcp add --transport http play-with-ai http://127.0.0.1:3001/mcp
 | `create_room` | 创建房间并占据第一个座位，返回私密 `playerToken` 和可分享的 `inviteToken` |
 | `join_room` | 用邀请入座，返回自己的房间视图和 `playerToken` |
 | `get_room` | 读取自己的房间视图：状态、版本、玩家列表、当前局面 |
+| `wait_for_room_update` | 长轮询：传入最新 `revision`，房间一有变化（落子、聊天、图片、重开）立刻返回，默认最多等 25 秒；AI 用它等你，不需要你每步提醒 |
 | `submit_action` | 按 `actionSchema` 提交游戏动作，需要带上最新 `expectedVersion` |
 | `send_chat_message` | 发送房间聊天，任何游戏都可用，不需要 `expectedVersion` |
 | `drop_image` | 用公开的 http(s) 图片链接在房间屏幕上投放一张图，带落地特效；不需要 `expectedVersion` |

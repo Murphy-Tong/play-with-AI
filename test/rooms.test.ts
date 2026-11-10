@@ -302,6 +302,36 @@ test('image drops are authenticated, validated, bounded, and do not change the g
   assert.equal(store.getRoom(input).version, 2);
 });
 
+test('waitForChange wakes on the next game action and otherwise times out', async () => {
+  const { store, host } = setup();
+  const guest = join(store, host);
+  const access = { roomId: host.room.id, playerToken: guest.playerToken };
+  const latest = store.getRoom(access);
+
+  const immediate = await store.waitForChange({ ...access, afterRevision: latest.revision - 1, timeoutMs: 1000 });
+  assert.equal(immediate.revision, latest.revision);
+
+  const waiting = store.waitForChange({ ...access, afterRevision: latest.revision, timeoutMs: 1000 });
+  const started = Date.now();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  store.submitAction({
+    roomId: host.room.id, playerToken: host.playerToken,
+    expectedVersion: latest.version, action: { type: 'message', text: 'move' },
+  });
+  const woke = await waiting;
+  assert.equal(woke.version, latest.version + 1);
+  assert.equal(woke.revision, latest.revision + 1);
+  assert.ok(Date.now() - started < 900);
+
+  const quiet = await store.waitForChange({ ...access, afterRevision: woke.revision, timeoutMs: 30 });
+  assert.equal(quiet.revision, woke.revision);
+
+  await assert.rejects(
+    store.waitForChange({ ...access, playerToken: 'nope', afterRevision: 1, timeoutMs: 1000 }),
+    { code: 'UNAUTHORIZED' },
+  );
+});
+
 test('sandbox is chat-only and cannot accept game actions', () => {
   const store = new RoomStore([sandboxGame]);
   const host = store.createRoom({ gameId: 'sandbox', playerName: 'Human' });

@@ -77,6 +77,7 @@ function normalizeImageUrl(value: string): string {
 export class RoomStore {
   private readonly games: Map<string, GameDefinition>;
   private readonly rooms = new Map<string, Room>();
+  private readonly waiters = new Map<string, Set<() => void>>();
 
   constructor(games: GameDefinition[]) {
     this.games = new Map(games.map((game) => [game.id, game]));
@@ -118,7 +119,7 @@ export class RoomStore {
       rematchVotes: new Set(),
     };
     const view = this.view(room, player.id);
-    this.rooms.set(room.id, room);
+    this.save(room);
     return { room: view, playerToken, inviteToken: room.inviteToken };
   }
 
@@ -150,13 +151,32 @@ export class RoomStore {
       state,
     };
     const view = this.view(nextRoom, player.id);
-    this.rooms.set(room.id, nextRoom);
+    this.save(nextRoom);
     return { room: view, playerToken };
   }
 
   getRoom(input: PlayerAccess): RoomView {
     const { room, playerId } = this.authenticate(input);
     return this.view(room, playerId);
+  }
+
+  async waitForChange(input: PlayerAccess & { afterRevision: number; timeoutMs: number }): Promise<RoomView> {
+    const { room, playerId } = this.authenticate(input);
+    if (room.revision !== input.afterRevision) return this.view(room, playerId);
+    await new Promise<void>((resolve) => {
+      const listeners = this.waiters.get(room.id) ?? new Set<() => void>();
+      this.waiters.set(room.id, listeners);
+      const done = () => {
+        clearTimeout(timer);
+        listeners.delete(done);
+        if (!listeners.size) this.waiters.delete(room.id);
+        resolve();
+      };
+      const timer = setTimeout(done, input.timeoutMs);
+      listeners.add(done);
+      if (this.rooms.get(room.id)?.revision !== input.afterRevision) done();
+    });
+    return this.getRoom(input);
   }
 
   submitAction(input: PlayerAccess & { expectedVersion: number; action: JsonObject }): RoomView {
@@ -184,7 +204,7 @@ export class RoomStore {
       revision: room.revision + 1,
     };
     const view = this.view(nextRoom, playerId);
-    this.rooms.set(room.id, nextRoom);
+    this.save(nextRoom);
     return view;
   }
 
@@ -200,7 +220,7 @@ export class RoomStore {
     ].slice(-CHAT_LIMIT);
     const nextRoom: Room = { ...room, chat, revision: room.revision + 1 };
     const view = this.view(nextRoom, playerId);
-    this.rooms.set(room.id, nextRoom);
+    this.save(nextRoom);
     return view;
   }
 
@@ -217,7 +237,7 @@ export class RoomStore {
     ].slice(-IMAGE_DROP_LIMIT);
     const nextRoom: Room = { ...room, imageDrops, revision: room.revision + 1 };
     const view = this.view(nextRoom, playerId);
-    this.rooms.set(room.id, nextRoom);
+    this.save(nextRoom);
     return view;
   }
 
@@ -243,8 +263,15 @@ export class RoomStore {
         }
       : { ...room, revision: room.revision + 1, rematchVotes: votes };
     const view = this.view(nextRoom, playerId);
-    this.rooms.set(room.id, nextRoom);
+    this.save(nextRoom);
     return view;
+  }
+
+  private save(room: Room) {
+    const changed = this.rooms.get(room.id)?.revision !== room.revision;
+    this.rooms.set(room.id, room);
+    if (!changed) return;
+    for (const wake of [...(this.waiters.get(room.id) ?? [])]) wake();
   }
 
   private findRoom(roomId: string): Room {

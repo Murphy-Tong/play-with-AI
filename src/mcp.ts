@@ -12,17 +12,30 @@ const chatText = z.string().trim().min(1).max(500).describe('Room chat message. 
 const imageUrl = z.string().trim().min(1).max(2048).describe('Public http(s) image URL. The browser loads it directly.');
 const imageCaption = z.string().trim().max(80).optional().describe('Optional short caption shown under the dropped image.');
 
+function failure(error: unknown): CallToolResult {
+  const data = {
+    error: error instanceof RoomError
+      ? { code: error.code, message: error.message }
+      : { code: 'INTERNAL_ERROR', message: 'The operation failed. Read the room state before deciding whether to retry.' },
+  };
+  return { isError: true, content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
+}
+
 function result(run: () => Record<string, unknown>): CallToolResult {
   try {
     const data = run();
     return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
   } catch (error) {
-    const data = {
-      error: error instanceof RoomError
-        ? { code: error.code, message: error.message }
-        : { code: 'INTERNAL_ERROR', message: 'The operation failed. Read the room state before deciding whether to retry.' },
-    };
-    return { isError: true, content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
+    return failure(error);
+  }
+}
+
+async function asyncResult(run: () => Promise<Record<string, unknown>>): Promise<CallToolResult> {
+  try {
+    const data = await run();
+    return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data };
+  } catch (error) {
+    return failure(error);
   }
 }
 
@@ -40,7 +53,7 @@ export function createMcpServer(store: RoomStore): McpServer {
       'drop_image is also room-level: give it a public http(s) image URL when your human asks for a picture. It falls over the whole room screen as a short effect, so use it sparingly.',
       'After a game finishes, either player may call request_rematch. The game restarts only after every player has requested it.',
       'The game adapter, not this service, defines player roles, turn rules, allowed actions and victory conditions.',
-      'There are no automatic agent wake-ups or change notifications. Do not poll in a tight loop or wait indefinitely without user direction.',
+      'This service cannot push. When you are waiting for the other player, call wait_for_room_update with the revision of your latest view; it returns as soon as anything changes or after the timeout. Call it again to keep waiting instead of polling in a tight loop.',
     ].join('\n'),
   });
 
@@ -76,6 +89,21 @@ export function createMcpServer(store: RoomStore): McpServer {
     inputSchema: z.strictObject({ roomId, playerToken }),
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, (input) => result(() => store.getRoom(input)));
+
+  server.registerTool('wait_for_room_update', {
+    title: 'Wait for the room to change',
+    description: 'Long-poll until the room changes (a move, chat message, image drop, join or rematch) or the timeout elapses, then return your room view. Pass the revision of your latest view; compare the returned revision to it, and call again to keep waiting. Use this instead of polling in a tight loop.',
+    inputSchema: z.strictObject({
+      roomId,
+      playerToken,
+      afterRevision: z.number().int().min(1).describe('The revision from your latest room view.'),
+      timeoutSeconds: z.number().int().min(1).max(60).optional().describe('How long to wait; defaults to 25 seconds.'),
+    }),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, (input) => asyncResult(() => store.waitForChange({
+    ...input,
+    timeoutMs: (input.timeoutSeconds ?? 25) * 1000,
+  })));
 
   server.registerTool('submit_action', {
     title: 'Submit a game action',

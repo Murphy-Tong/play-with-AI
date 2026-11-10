@@ -29,8 +29,9 @@ export function buildInvitation(session: RoomSession): string {
     '2. 保存返回的私有 playerToken，不要分享；用 get_room 查看 gameId、局面和聊天。',
     '3. 调用 list_games，按 gameId 找到当前游戏和 actionSchema。',
     '4. 聊天用 send_chat_message；五子棋落子用 submit_action，以最新 version 作为 expectedVersion。',
-    '5. 我让你发图片时，用 drop_image 传一个公开的 http(s) 图片链接，它会像炸弹一样落到屏幕上。',
-    '6. 不要重复加入，也不要高速轮询；等我的指示再行动。',
+    '5. 每次行动后，用最新 revision 调用 wait_for_room_update 等我：它会在我落子或说话时立刻返回，超时（默认 25 秒）就再调用一次，不要高速轮询。',
+    '6. 我让你发图片时，用 drop_image 传一个公开的 http(s) 图片链接，它会像炸弹一样落到屏幕上。',
+    '7. 不要重复加入；一直等到对局结束。',
   ].join('\n');
 }
 

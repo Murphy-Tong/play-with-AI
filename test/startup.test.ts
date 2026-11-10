@@ -30,7 +30,7 @@ test('entrypoint starts on loopback and prints a usable MCP endpoint', { timeout
   assert.equal(new URL(config.url).hostname, '127.0.0.1');
   assert.equal(config.authorization, undefined);
   await client.connect(new StreamableHTTPClientTransport(new URL(config.url)));
-  assert.equal((await client.listTools()).tools.length, 8);
+  assert.equal((await client.listTools()).tools.length, 9);
 });
 
 test('entrypoint rejects invalid environment values without echoing them', async () => {
