@@ -12,15 +12,18 @@ const roomIdSchema = z.uuid();
 const playerNameSchema = z.string().trim().min(1).max(40);
 const tokenSchema = z.string().min(1).max(256);
 const avatarUrlSchema = z.string().trim().max(500).optional();
+const clientIdSchema = z.string().trim().min(1).max(80).optional();
 const createSchema = z.strictObject({
   gameId: z.string().trim().min(1).max(64),
   playerName: playerNameSchema,
   avatarUrl: avatarUrlSchema,
+  clientId: clientIdSchema,
 });
 const joinSchema = z.strictObject({
   inviteToken: tokenSchema,
   playerName: playerNameSchema,
   avatarUrl: avatarUrlSchema,
+  clientId: clientIdSchema,
 });
 const actionSchema = z.strictObject({
   expectedVersion: z.number().int().min(1),
@@ -33,6 +36,7 @@ const roomStatus: Record<string, number> = {
   ROOM_NOT_FOUND: 404,
   UNAUTHORIZED: 401,
   INVALID_INVITE: 403,
+  FORBIDDEN: 403,
   ROOM_FULL: 409,
   ROOM_NOT_READY: 409,
   ROOM_FINISHED: 409,
@@ -40,6 +44,9 @@ const roomStatus: Record<string, number> = {
   INVALID_ACTION: 400,
   INVALID_MESSAGE: 400,
   INVALID_IMAGE: 400,
+  INVALID_INPUT: 400,
+  INVALID_TARGET: 400,
+  PLAYER_NOT_FOUND: 404,
   ROOM_NOT_FINISHED: 409,
 };
 
@@ -110,6 +117,49 @@ export function createWebApi(store: RoomStore): Router {
 
   router.get('/rooms/:roomId', (req, res) => {
     res.json(store.getRoom({ roomId: parseRoomId(req.params.roomId), playerToken: bearer(req) }));
+  });
+
+  router.get('/rooms/:roomId/events', (req, res) => {
+    const roomId = parseRoomId(req.params.roomId);
+    const playerToken = typeof req.query.token === 'string' ? req.query.token : '';
+    if (!playerToken) throw new AuthError();
+    const access = { roomId, playerToken };
+    const initial = store.getRoom(access);
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-store',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write('retry: 2000\n\n');
+    const send = (revision: number) => {
+      res.write(`event: update\ndata: ${JSON.stringify({ revision })}\n\n`);
+    };
+    send(initial.revision);
+    const unsubscribe = store.subscribe(access, () => {
+      try {
+        send(store.getRoom(access).revision);
+      } catch {
+        res.end();
+      }
+    });
+    const heartbeat = setInterval(() => res.write(': keepalive\n\n'), 25_000);
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+    });
+  });
+
+  router.delete('/rooms/:roomId/players/me', (req, res) => {
+    res.json(store.leaveRoom({ roomId: parseRoomId(req.params.roomId), playerToken: bearer(req) }));
+  });
+
+  router.delete('/rooms/:roomId/players/:playerId', (req, res) => {
+    res.json(store.kickPlayer({
+      roomId: parseRoomId(req.params.roomId),
+      playerToken: bearer(req),
+      targetPlayerId: parseRoomId(req.params.playerId),
+    }));
   });
 
   router.post('/rooms/:roomId/actions', requireJson, ...jsonBody, (req, res) => {

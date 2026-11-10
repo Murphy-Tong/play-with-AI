@@ -10,6 +10,10 @@ export type RoomErrorCode =
   | 'INVALID_ACTION'
   | 'INVALID_MESSAGE'
   | 'INVALID_IMAGE'
+  | 'INVALID_INPUT'
+  | 'INVALID_TARGET'
+  | 'FORBIDDEN'
+  | 'PLAYER_NOT_FOUND'
   | 'ROOM_NOT_FINISHED';
 
 export class RoomError extends Error {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import AppIcon from './components/AppIcon.vue';
 import AppDialog from './components/AppDialog.vue';
 import LobbyPage from './components/LobbyPage.vue';
@@ -10,7 +10,7 @@ import { usePlayground } from './lib/usePlayground.ts';
 import { buildInvitation } from './lib/session.ts';
 import type { GameInfo } from './lib/types.ts';
 
-const { games, gamesLoading, gamesError, session, room, page, roomLoading, roomError, sendError, storageNotice, expired, sending, creating, loadGames, refreshRoom, createRoom, sendChat, place, requestRematch } = usePlayground();
+const { games, gamesLoading, gamesError, session, room, page, roomLoading, roomError, sendError, storageNotice, expired, sending, creating, loadGames, refreshRoom, createRoom, sendChat, place, requestRematch, kick } = usePlayground();
 const dialog = ref<'create' | 'guide' | 'invite' | null>(null);
 const selectedGame = ref<GameInfo | null>(null);
 const playerName = ref(session.value?.playerName ?? '');
@@ -22,15 +22,25 @@ const invitationField = ref<HTMLTextAreaElement>();
 const invitation = computed(() => session.value ? buildInvitation(session.value) : '');
 
 function updateViewport() {
-  document.documentElement.style.setProperty('--app-height', `${window.visualViewport?.height ?? window.innerHeight}px`);
+  const viewport = window.visualViewport;
+  const height = viewport?.height ?? window.innerHeight;
+  const offset = Math.max(0, viewport?.offsetTop ?? 0);
+  const root = document.documentElement;
+  root.style.setProperty('--app-height', `${height}px`);
+  root.style.setProperty('--app-offset', `${offset}px`);
 }
 onMounted(() => {
   updateViewport();
   window.visualViewport?.addEventListener('resize', updateViewport);
+  window.visualViewport?.addEventListener('scroll', updateViewport);
   window.addEventListener('resize', updateViewport);
 });
+watch(page, (value) => {
+  document.documentElement.classList.toggle('room-open', value === 'room');
+}, { immediate: true });
 onUnmounted(() => {
   window.visualViewport?.removeEventListener('resize', updateViewport);
+  window.visualViewport?.removeEventListener('scroll', updateViewport);
   window.removeEventListener('resize', updateViewport);
 });
 
@@ -75,7 +85,7 @@ async function copyInvitation() {
     <header class="site-header"><div class="header-inner page-width"><button class="brand" aria-label="同游，返回游戏大厅" @click="page = 'lobby'"><span class="brand-mark"><i></i><i></i></span><strong>同游</strong><span class="brand-subtitle">PLAY WITH AI</span></button><nav aria-label="主导航"><button :class="{ active: page === 'lobby' }" @click="page = 'lobby'">游戏大厅</button><button @click="dialog = 'guide'">连接指南 <AppIcon name="arrow" :size="14" /></button></nav><span class="local-label"><i></i> 本地游乐场</span></div></header>
     <div v-if="storageNotice" class="storage-notice page-width" role="status">{{ storageNotice }}</div>
     <LobbyPage v-if="page === 'lobby'" :games="games" :loading="gamesLoading" :error="gamesError" :has-room="!!session && !expired" @create="openCreate" @resume="page = 'room'" @guide="dialog = 'guide'" @retry="loadGames" />
-    <RoomPage v-if="session" v-show="page === 'room'" :key="session.roomId" :room="room" :session="session" :loading="roomLoading" :error="roomError" :send-error="sendError" :sending="sending" :expired="expired" :send-chat="sendChat" :place="place" :request-rematch="requestRematch" @back="page = 'lobby'" @invite="openInvite" @guide="dialog = 'guide'" @retry="refreshRoom" />
+    <RoomPage v-if="session" v-show="page === 'room'" :key="session.roomId" :room="room" :session="session" :loading="roomLoading" :error="roomError" :send-error="sendError" :sending="sending" :expired="expired" :send-chat="sendChat" :place="place" :request-rematch="requestRematch" :kick="kick" @back="page = 'lobby'" @invite="openInvite" @guide="dialog = 'guide'" @retry="refreshRoom" />
 
     <AppDialog v-if="dialog === 'create'" title="给这场同游，留一个位置" :dismissible="!creating" @close="dialog = null">
       <div class="create-game-preview"><span><AppIcon name="spark" :size="26" /></span><div><strong>{{ selectedGame?.id === 'sandbox' ? '默契试验场' : selectedGame?.title }}</strong><p>{{ selectedGame?.id === 'gomoku' ? '双人五子棋 · 15×15 · 可聊天' : '双人互动 · 自由聊天 · 不计输赢' }}</p></div></div>

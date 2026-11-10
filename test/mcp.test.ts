@@ -66,7 +66,7 @@ test('MCP advertises discoverable game schemas and the room tools', async (t) =>
   const client = await connect();
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
-    'create_room', 'drop_image', 'get_room', 'join_room', 'list_games',
+    'create_room', 'drop_image', 'get_room', 'join_room', 'leave_room', 'list_games',
     'request_rematch', 'send_chat_message', 'submit_action', 'wait_for_room_update',
   ]);
   assert.equal(tools.tools.find((tool) => tool.name === 'get_room')?.annotations?.readOnlyHint, true);
@@ -205,6 +205,34 @@ test('MCP wait_for_room_update returns on the next change and honors its timeout
     roomId: host.room.id, playerToken: guest.playerToken, afterRevision: woke.revision, timeoutSeconds: 1,
   });
   assert.equal(timedOut.revision, woke.revision);
+});
+
+test('MCP join_room restores a seat by clientId and leave_room frees it', async (t) => {
+  const { connect } = await setup(t);
+  const human = await connect();
+  const agent = await connect();
+  const host = await call<ReturnType<RoomStore['createRoom']>>(human, 'create_room', {
+    gameId: 'sandbox', playerName: 'Human', clientId: 'human-host',
+  });
+  const guest = await call<ReturnType<RoomStore['joinRoom']>>(agent, 'join_room', {
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent', clientId: 'lingjun',
+  });
+  assert.equal(guest.recovered, false);
+  const recovered = await call<ReturnType<RoomStore['joinRoom']>>(agent, 'join_room', {
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent', clientId: 'lingjun',
+  });
+  assert.equal(recovered.recovered, true);
+  assert.equal(recovered.room.selfPlayerId, guest.room.selfPlayerId);
+  assert.equal(recovered.room.version, guest.room.version);
+  await expectError(agent, 'get_room', { roomId: host.room.id, playerToken: guest.playerToken }, 'UNAUTHORIZED');
+  const left = await call<{ roomId: string; left: true }>(agent, 'leave_room', {
+    roomId: host.room.id, playerToken: recovered.playerToken,
+  });
+  assert.deepEqual(left, { roomId: host.room.id, left: true });
+  const replacement = await call<ReturnType<RoomStore['joinRoom']>>(agent, 'join_room', {
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent 2', clientId: 'lingjun-2',
+  });
+  assert.equal(replacement.room.players.length, 2);
 });
 
 test('MCP domain errors are structured and stale actions cannot be replayed', async (t) => {

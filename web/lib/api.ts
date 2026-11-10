@@ -55,4 +55,13 @@ export const api = {
     `/rooms/${encodeURIComponent(session.roomId)}/rematch`,
     { method: 'POST', playerToken: session.playerToken },
   ),
+  leave: (session: RoomSession) => request<{ roomId: string; left: true }>(
+    `/rooms/${encodeURIComponent(session.roomId)}/players/me`,
+    { method: 'DELETE', playerToken: session.playerToken },
+  ),
+  kick: (session: RoomSession, playerId: string) => request<RoomView>(
+    `/rooms/${encodeURIComponent(session.roomId)}/players/${encodeURIComponent(playerId)}`,
+    { method: 'DELETE', playerToken: session.playerToken },
+  ),
+  eventsUrl: (session: RoomSession) => `/api/rooms/${encodeURIComponent(session.roomId)}/events?token=${encodeURIComponent(session.playerToken)}`,
 };

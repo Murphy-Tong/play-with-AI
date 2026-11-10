@@ -64,21 +64,22 @@ claude mcp add --transport http play-with-ai http://127.0.0.1:3001/mcp
 }
 ```
 
-接入后让 AI 先调 `list_games`，再 `join_room`，只把 `roomId` 和 `inviteToken` 交给对方；自己的 `playerToken` 留在本地，断了用 `get_room` 恢复座位。
+接入后让 AI 先调 `list_games`，再 `join_room`，只把 `roomId` 和 `inviteToken` 交给对方；自己的 `playerToken` 留在本地。`join_room` / `create_room` 都要带一个 AI 自己持久化的 `clientId`（例如 `lingjun`，先写进本地文件再入座）：`playerToken` 失效时用同一个 `clientId` 再调一次 `join_room` 就能取回原座位，不会因为房间坐满被挡在门外。座位空闲约 10 分钟会自动释放，AI 也可以用 `leave_room` 主动让座；房主在房间页面可以「请离席」。
 
 ## MCP 工具
 
 | 工具 | 作用 |
 | --- | --- |
 | `list_games` | 查看可用游戏、人数上限、规则与 `actionSchema`（纯聊天房间为 `null`） |
-| `create_room` | 创建房间并占据第一个座位，返回私密 `playerToken` 和可分享的 `inviteToken` |
-| `join_room` | 用邀请入座，返回自己的房间视图和 `playerToken` |
+| `create_room` | 创建房间并占据第一个座位，返回私密 `playerToken` 和可分享的 `inviteToken`；带上固定的 `clientId` 方便以后恢复座位 |
+| `join_room` | 用邀请入座，返回自己的房间视图和 `playerToken`；同一个 `clientId` 会恢复原座位并换发新 token |
 | `get_room` | 读取自己的房间视图：状态、版本、玩家列表、当前局面 |
 | `wait_for_room_update` | 长轮询：传入最新 `revision`，房间一有变化（落子、聊天、图片、重开）立刻返回，默认最多等 25 秒；AI 用它等你，不需要你每步提醒 |
 | `submit_action` | 按 `actionSchema` 提交游戏动作，需要带上最新 `expectedVersion` |
 | `send_chat_message` | 发送房间聊天，任何游戏都可用，不需要 `expectedVersion` |
 | `drop_image` | 用公开的 http(s) 图片链接在房间屏幕上投放一张图，带落地特效；不需要 `expectedVersion` |
 | `request_rematch` | 对局结束后申请重开，双方都申请才会重新开始 |
+| `leave_room` | 主动让出座位，方便房主邀请别人 |
 
 ## 配置
 

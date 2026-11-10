@@ -17,6 +17,7 @@ const props = defineProps<{
   sendChat: (text: string) => Promise<boolean>;
   place: (row: number, col: number) => Promise<boolean>;
   requestRematch: () => Promise<boolean>;
+  kick: (playerId: string) => Promise<boolean>;
 }>();
 const emit = defineEmits<{ back: []; invite: []; guide: []; retry: [] }>();
 const draft = ref('');
@@ -24,6 +25,7 @@ const conversation = ref<HTMLElement>();
 const nearBottom = ref(true);
 const messages = computed(() => props.room?.chat ?? []);
 const otherPlayer = computed(() => props.room?.players.find((player) => player.id !== props.room?.selfPlayerId));
+const isHost = computed(() => !!props.room && props.room.hostId === props.room.selfPlayerId);
 const canSend = computed(() => !props.expired && !props.sending && !!draft.value.trim());
 const isGomoku = computed(() => props.room?.gameId === 'gomoku');
 const gameTitle = computed(() => isGomoku.value ? '五子棋' : '默契试验场');
@@ -57,8 +59,8 @@ watch(() => props.room?.revision, async () => {
       <aside class="room-sidebar">
         <div class="room-summary"><span class="eyebrow">SANDBOX / 01</span><h1>{{ gameTitle }}</h1><p>同一个房间，两个有趣的灵魂。</p><span class="status-pill" :class="{ warning: !!error || expired }"><i></i>{{ statusText }}</span></div>
         <div class="players-panel"><div class="panel-label">这张桌上的玩家 <span>{{ room?.players.length ?? 1 }} / 2</span></div>
-          <div class="player-row"><PlayerAvatar :player="room?.players.find((player) => player.id === room?.selfPlayerId)" :fallback-name="session.playerName" /><div><strong>{{ session.playerName }}</strong><span>准备好出发了</span></div><span class="you-tag">你</span></div>
-          <div class="player-row"><PlayerAvatar :player="otherPlayer" ai /><div><strong>{{ otherPlayer?.name ?? '留给你的 AI' }}</strong><span>{{ otherPlayer ? '已加入房间' : '一个空位，一点期待' }}</span></div><span v-if="otherPlayer" class="online-dot"></span></div>
+          <div class="player-row"><PlayerAvatar :player="room?.players.find((player) => player.id === room?.selfPlayerId)" :fallback-name="session.playerName" /><div><strong>{{ session.playerName }}</strong><span>{{ isHost ? '房主 · 准备好出发了' : '准备好出发了' }}</span></div><span class="you-tag">你</span></div>
+          <div class="player-row"><PlayerAvatar :player="otherPlayer" ai /><div><strong>{{ otherPlayer?.name ?? '留给你的 AI' }}</strong><span>{{ otherPlayer ? '已加入房间' : '一个空位，一点期待' }}</span></div><button v-if="otherPlayer && isHost && !expired" class="text-button kick-button" :disabled="sending" @click="props.kick(otherPlayer.id)">请离席</button><span v-else-if="otherPlayer" class="online-dot"></span></div>
         </div>
         <button v-if="!otherPlayer && !expired && session.inviteToken" class="button primary invite-sidebar-button" @click="emit('invite')"><AppIcon name="copy" :size="17" /> 复制邀请指令</button>
         <div class="room-tips"><AppIcon name="info" :size="18" /><p>这里是消息互动沙盒，不计输赢。<br />Agent 需要你在它的对话里发出指示，不会自动回复。</p></div>
@@ -67,7 +69,7 @@ watch(() => props.room?.revision, async () => {
       </aside>
 
       <section class="conversation-panel" aria-label="房间互动">
-        <div class="conversation-header"><div><AppIcon name="spark" :size="19" /><strong>同游进行时</strong></div><span>{{ room?.status === 'active' ? '每 2.5 秒同步' : '从一句你好开始' }}</span></div>
+        <div class="conversation-header"><div><AppIcon name="spark" :size="19" /><strong>同游进行时</strong></div><span>{{ room?.status === 'active' ? '实时同步' : '从一句你好开始' }}</span></div>
         <div v-if="error" class="room-error" role="alert"><AppIcon name="info" :size="18" /><span>{{ error }}</span><button v-if="!expired" class="text-button" @click="emit('retry')">重试</button><button v-else class="text-button" @click="emit('back')">回大厅</button></div>
         <div ref="conversation" class="conversation-scroll" role="log" aria-label="消息记录" aria-live="polite" aria-relevant="additions" @scroll="onScroll">
           <div v-if="loading && !room" class="conversation-empty"><span class="spinner"></span><h2>正在找回你的房间</h2><p>给我们一点时间，座位还在。</p></div>
@@ -87,7 +89,7 @@ watch(() => props.room?.revision, async () => {
       v-else-if="room"
       :room="room" :session="session" :error="error" :send-error="sendError"
       :sending="sending" :expired="expired" :send-chat="sendChat" :place="place"
-      :request-rematch="requestRematch" :invite="() => emit('invite')"
+      :request-rematch="requestRematch" :kick="props.kick" :invite="() => emit('invite')"
       @retry="emit('retry')"
     />
     <div v-else class="gomoku-loading"><span class="spinner"></span> 正在找回你的棋局…</div>

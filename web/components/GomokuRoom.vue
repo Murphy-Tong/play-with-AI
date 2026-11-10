@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import AppDialog from './AppDialog.vue';
 import AppIcon from './AppIcon.vue';
 import ChatComposer from './ChatComposer.vue';
 import ChatHistory from './ChatHistory.vue';
 import GomokuBoard from './GomokuBoard.vue';
 import PlayerAvatar from './PlayerAvatar.vue';
-import type { GomokuView, RoomSession, RoomView } from '../lib/types.ts';
+import type { ChatMessage, GomokuView, RoomSession, RoomView } from '../lib/types.ts';
 
 const props = defineProps<{
   room: RoomView;
@@ -18,6 +18,7 @@ const props = defineProps<{
   sendChat: (text: string) => Promise<boolean>;
   place: (row: number, col: number) => Promise<boolean>;
   requestRematch: () => Promise<boolean>;
+  kick: (playerId: string) => Promise<boolean>;
   invite: () => void;
 }>();
 const emit = defineEmits<{ retry: [] }>();
@@ -30,8 +31,7 @@ const winningCells = computed(() => {
 });
 const me = computed(() => props.room.players.find((player) => player.id === props.room.selfPlayerId));
 const opponent = computed(() => props.room.players.find((player) => player.id !== props.room.selfPlayerId));
-const lastMine = computed(() => [...props.room.chat].reverse().find((message) => message.playerId === props.room.selfPlayerId));
-const lastOpponent = computed(() => [...props.room.chat].reverse().find((message) => message.playerId !== props.room.selfPlayerId));
+const isHost = computed(() => props.room.hostId === props.room.selfPlayerId);
 const myColor = computed(() => state.value.yourColor);
 const opponentColor = computed(() => myColor.value === 'black' ? 'white' : 'black');
 const myTurn = computed(() => props.room.status === 'active' && !state.value.result && state.value.turn === myColor.value);
@@ -51,6 +51,42 @@ const statusText = computed(() => {
   return myTurn.value ? '轮到你落子' : '等对方落子';
 });
 const composerDisabled = computed(() => props.expired || props.sending);
+
+type Bubble = { id: string; name: string; text: string; self: boolean };
+const bubbles = ref<Bubble[]>([]);
+const knownIds = new Set(props.room.chat.map((message) => message.id));
+const bubbleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function dismissBubble(id: string) {
+  const timer = bubbleTimers.get(id);
+  if (timer) clearTimeout(timer);
+  bubbleTimers.delete(id);
+  bubbles.value = bubbles.value.filter((bubble) => bubble.id !== id);
+}
+
+function showBubble(message: ChatMessage) {
+  const player = props.room.players.find((candidate) => candidate.id === message.playerId);
+  bubbles.value = [...bubbles.value, {
+    id: message.id,
+    name: player?.name ?? '玩家',
+    text: message.text,
+    self: message.playerId === props.room.selfPlayerId,
+  }].slice(-3);
+  bubbleTimers.set(message.id, setTimeout(() => dismissBubble(message.id), 3600));
+}
+
+watch(() => props.room.chat, (chat) => {
+  for (const message of chat) {
+    if (knownIds.has(message.id)) continue;
+    knownIds.add(message.id);
+    showBubble(message);
+  }
+}, { deep: true });
+
+onUnmounted(() => {
+  for (const timer of bubbleTimers.values()) clearTimeout(timer);
+  bubbleTimers.clear();
+});
 
 async function send() {
   if (composerDisabled.value || !draft.value.trim()) return;
@@ -75,15 +111,20 @@ function place(row: number, col: number) {
         <div class="gomoku-player-name">
           <strong>{{ opponent?.name ?? '留给你的 AI' }}</strong>
           <span v-if="opponent" class="stone-tag" :class="`stone-tag-${opponentColor}`"></span>
+          <span v-if="opponent && !isHost" class="host-tag">房主</span>
         </div>
-        <p v-if="lastOpponent" class="chat-bubble">{{ lastOpponent.text }}</p>
-        <p v-else class="chat-bubble chat-bubble-empty">{{ opponent ? '还没有消息' : '邀请你的 AI 来下棋' }}</p>
       </div>
+      <button v-if="opponent && isHost && !expired" class="text-button kick-button" :disabled="sending" @click="props.kick(opponent.id)">请离席</button>
       <button class="text-button history-button" @click="historyOpen = true">对话记录</button>
     </div>
 
     <div class="gomoku-stage">
       <div class="gomoku-status" :class="{ mine: myTurn }"><i></i>{{ statusText }}</div>
+      <div class="gomoku-bubble-layer" aria-live="polite" aria-atomic="false">
+        <div v-for="bubble in bubbles" :key="bubble.id" class="gomoku-bubble" :class="{ self: bubble.self }">
+          <span class="gomoku-bubble-name">{{ bubble.name }}</span>{{ bubble.text }}
+        </div>
+      </div>
       <GomokuBoard
         :board="state.board" :last-move="state.lastMove"
         :winning-cells="winningCells"
@@ -104,10 +145,9 @@ function place(row: number, col: number) {
         <div class="gomoku-player-name">
           <strong>{{ me?.name ?? session.playerName }}</strong>
           <span class="stone-tag" :class="`stone-tag-${myColor}`"></span>
+          <span v-if="isHost" class="host-tag">房主</span>
           <span class="you-tag">你</span>
         </div>
-        <p v-if="lastMine" class="chat-bubble chat-bubble-self">{{ lastMine.text }}</p>
-        <p v-else class="chat-bubble chat-bubble-empty">{{ room.status === 'waiting' ? '先留一句话，等对方入座' : '边下边聊，说点什么' }}</p>
       </div>
     </div>
 

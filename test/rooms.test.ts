@@ -341,3 +341,88 @@ test('sandbox is chat-only and cannot accept game actions', () => {
     expectedVersion: 2, action: { type: 'message', text: 'legacy' },
   }), { code: 'INVALID_ACTION' });
 });
+
+test('joining again with the same clientId restores the seat instead of failing with ROOM_FULL', () => {
+  const store = new RoomStore([sandboxGame]);
+  const host = store.createRoom({ gameId: 'sandbox', playerName: 'Human', clientId: 'human-browser' });
+  const first = store.joinRoom({
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent', clientId: 'lingjun',
+  });
+  assert.equal(first.recovered, false);
+  const recovered = store.joinRoom({
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent', clientId: 'lingjun',
+  });
+  assert.equal(recovered.recovered, true);
+  assert.equal(recovered.room.selfPlayerId, first.room.selfPlayerId);
+  assert.equal(recovered.room.version, first.room.version);
+  assert.deepEqual(recovered.room.state, first.room.state);
+  assert.equal(recovered.room.revision, first.room.revision + 1);
+  assert.equal(recovered.room.players.length, 2);
+  assert.notEqual(recovered.playerToken, first.playerToken);
+  assert.throws(() => store.getRoom({ roomId: host.room.id, playerToken: first.playerToken }), { code: 'UNAUTHORIZED' });
+  assert.equal(store.getRoom({ roomId: host.room.id, playerToken: recovered.playerToken }).selfPlayerId, first.room.selfPlayerId);
+
+  const hostSeat = store.joinRoom({
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Human', clientId: 'human-browser',
+  });
+  assert.equal(hostSeat.recovered, true);
+  assert.equal(hostSeat.room.selfPlayerId, host.room.selfPlayerId);
+});
+
+test('a full room tells the client how to recover or free a seat', () => {
+  const { store, host } = setup();
+  join(store, host);
+  assert.throws(
+    () => store.joinRoom({ roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Third', clientId: 'other' }),
+    (error: Error & { code?: string }) => error.code === 'ROOM_FULL' && /clientId/.test(error.message),
+  );
+});
+
+test('idle seats are released on the next join without disturbing the active player', async () => {
+  const store = new RoomStore([sandboxGame], { idleSeatMs: 20 });
+  const host = store.createRoom({ gameId: 'sandbox', playerName: 'Human' });
+  const guest = store.joinRoom({ roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Ghost' });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  store.getRoom({ roomId: host.room.id, playerToken: host.playerToken });
+  const replacement = store.joinRoom({ roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent' });
+  assert.equal(replacement.recovered, false);
+  assert.equal(replacement.room.players.length, 2);
+  assert.equal(replacement.room.players.some((player) => player.id === guest.room.selfPlayerId), false);
+  assert.throws(() => store.getRoom({ roomId: host.room.id, playerToken: guest.playerToken }), { code: 'UNAUTHORIZED' });
+});
+
+test('leaving releases the seat and hands the host role to the remaining player', () => {
+  const store = new RoomStore([sandboxGame]);
+  const host = store.createRoom({ gameId: 'sandbox', playerName: 'Human' });
+  const guest = store.joinRoom({ roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent' });
+  assert.deepEqual(store.leaveRoom({ roomId: host.room.id, playerToken: host.playerToken }), { roomId: host.room.id, left: true });
+  const remaining = store.getRoom({ roomId: host.room.id, playerToken: guest.playerToken });
+  assert.equal(remaining.players.length, 1);
+  assert.equal(remaining.hostId, guest.room.selfPlayerId);
+  assert.equal(remaining.status, 'waiting');
+  assert.throws(() => store.getRoom({ roomId: host.room.id, playerToken: host.playerToken }), { code: 'UNAUTHORIZED' });
+  const fresh = store.joinRoom({ roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'New agent' });
+  assert.equal(fresh.room.players.length, 2);
+  assert.equal(fresh.room.status, 'active');
+});
+
+test('only the host can release another seat', () => {
+  const { store, host } = setup();
+  const guest = join(store, host);
+  assert.throws(() => store.kickPlayer({
+    roomId: host.room.id, playerToken: guest.playerToken, targetPlayerId: host.room.selfPlayerId,
+  }), { code: 'FORBIDDEN' });
+  assert.throws(() => store.kickPlayer({
+    roomId: host.room.id, playerToken: host.playerToken, targetPlayerId: host.room.selfPlayerId,
+  }), { code: 'INVALID_TARGET' });
+  const view = store.kickPlayer({
+    roomId: host.room.id, playerToken: host.playerToken, targetPlayerId: guest.room.selfPlayerId,
+  });
+  assert.equal(view.players.length, 1);
+  assert.equal(view.hostId, host.room.selfPlayerId);
+  assert.equal(view.status, 'waiting');
+  assert.throws(() => store.getRoom({ roomId: host.room.id, playerToken: guest.playerToken }), { code: 'UNAUTHORIZED' });
+  assert.throws(() => store.kickPlayer({
+    roomId: host.room.id, playerToken: host.playerToken, targetPlayerId: guest.room.selfPlayerId,
+  }), { code: 'PLAYER_NOT_FOUND' });
+});

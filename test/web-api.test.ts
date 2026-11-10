@@ -215,6 +215,65 @@ test('web domain errors preserve actionable conflict and invitation codes', asyn
   }, host.playerToken), 409, 'VERSION_CONFLICT');
 });
 
+test('web releases seats through leave and host kick', async (t) => {
+  const { base, create, post } = await setup(t);
+  const host = await create();
+  const joined = await post(`/rooms/${host.room.id}/join`, { inviteToken: host.inviteToken, playerName: 'Agent' });
+  const guest = await joined.json() as ReturnType<RoomStore['joinRoom']>;
+  const forbidden = await fetch(`${base}/api/rooms/${host.room.id}/players/${host.room.selfPlayerId}`, {
+    method: 'DELETE', headers: { Authorization: `Bearer ${guest.playerToken}` },
+  });
+  await assertError(forbidden, 403, 'FORBIDDEN');
+  const kicked = await fetch(`${base}/api/rooms/${host.room.id}/players/${guest.room.selfPlayerId}`, {
+    method: 'DELETE', headers: { Authorization: `Bearer ${host.playerToken}` },
+  });
+  assert.equal(kicked.status, 200);
+  const view = await kicked.json() as RoomView;
+  assert.equal(view.players.length, 1);
+  assert.equal(view.status, 'waiting');
+  await assertError(await fetch(`${base}/api/rooms/${host.room.id}`, {
+    headers: { Authorization: `Bearer ${guest.playerToken}` },
+  }), 401, 'UNAUTHORIZED');
+
+  const again = await post(`/rooms/${host.room.id}/join`, { inviteToken: host.inviteToken, playerName: 'Agent 2' });
+  const second = await again.json() as ReturnType<RoomStore['joinRoom']>;
+  const left = await fetch(`${base}/api/rooms/${host.room.id}/players/me`, {
+    method: 'DELETE', headers: { Authorization: `Bearer ${second.playerToken}` },
+  });
+  assert.equal(left.status, 200);
+  assert.deepEqual(await left.json(), { roomId: host.room.id, left: true });
+});
+
+test('room events stream pushes the new revision and rejects a missing token', async (t) => {
+  const { base, create, post } = await setup(t);
+  const host = await create();
+  await assertError(await fetch(`${base}/api/rooms/${host.room.id}/events`), 401, 'UNAUTHORIZED');
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const response = await fetch(
+    `${base}/api/rooms/${host.room.id}/events?token=${encodeURIComponent(host.playerToken)}`,
+    { signal: controller.signal },
+  );
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type')!, /text\/event-stream/);
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const readUntil = async (needle: string) => {
+    const deadline = Date.now() + 3000;
+    while (!buffer.includes(needle)) {
+      assert.ok(Date.now() < deadline, `timed out waiting for ${needle}: ${buffer}`);
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+    }
+  };
+  await readUntil('event: update');
+  await post(`/rooms/${host.room.id}/chat`, { text: 'ping' }, host.playerToken);
+  await readUntil('"revision":2');
+  controller.abort();
+});
+
 test('web API rejects cross-origin requests without enabling CORS', async (t) => {
   const { base } = await setup(t);
   for (const headers of [{ Origin: 'https://untrusted.invalid' }, { Origin: 'null' }, { 'Sec-Fetch-Site': 'cross-site' }] as Record<string, string>[]) {

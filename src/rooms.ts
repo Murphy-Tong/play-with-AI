@@ -8,6 +8,8 @@ export const CHAT_TEXT_LIMIT = 500;
 export const IMAGE_DROP_LIMIT = 20;
 export const IMAGE_URL_LIMIT = 2048;
 export const IMAGE_CAPTION_LIMIT = 80;
+export const CLIENT_ID_LIMIT = 80;
+export const IDLE_SEAT_MS = 10 * 60 * 1000;
 
 export type ChatMessage = {
   id: string;
@@ -31,6 +33,7 @@ export type RoomView = {
   version: number;
   revision: number;
   players: Player[];
+  hostId: string;
   selfPlayerId: string;
   state: JsonObject;
   chat: ChatMessage[];
@@ -45,7 +48,10 @@ type Room = {
   version: number;
   revision: number;
   players: Player[];
+  hostId: string;
   credentials: Map<string, string>;
+  seatClientIds: Map<string, string>;
+  lastSeen: Map<string, number>;
   inviteToken: string;
   state: JsonObject;
   chat: ChatMessage[];
@@ -58,6 +64,15 @@ type PlayerAccess = { roomId: string; playerToken: string };
 function normalizeAvatar(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function normalizeClientId(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > CLIENT_ID_LIMIT) {
+    throw new RoomError('INVALID_INPUT', `clientId is limited to ${CLIENT_ID_LIMIT} characters.`);
+  }
+  return trimmed;
 }
 
 function normalizeImageUrl(value: string): string {
@@ -78,9 +93,11 @@ export class RoomStore {
   private readonly games: Map<string, GameDefinition>;
   private readonly rooms = new Map<string, Room>();
   private readonly waiters = new Map<string, Set<() => void>>();
+  private readonly idleSeatMs: number;
 
-  constructor(games: GameDefinition[]) {
+  constructor(games: GameDefinition[], options: { idleSeatMs?: number } = {}) {
     this.games = new Map(games.map((game) => [game.id, game]));
+    this.idleSeatMs = options.idleSeatMs ?? IDLE_SEAT_MS;
   }
 
   listGames() {
@@ -94,10 +111,11 @@ export class RoomStore {
     }));
   }
 
-  createRoom(input: { gameId: string; playerName: string; avatarUrl?: string }) {
+  createRoom(input: { gameId: string; playerName: string; avatarUrl?: string; clientId?: string }) {
     const game = this.games.get(input.gameId);
     if (!game) throw new RoomError('GAME_NOT_FOUND', 'Choose a game returned by list_games.');
     const avatarUrl = normalizeAvatar(input.avatarUrl);
+    const clientId = normalizeClientId(input.clientId);
     const player: Player = {
       id: randomUUID(),
       name: input.playerName,
@@ -111,7 +129,10 @@ export class RoomStore {
       version: 1,
       revision: 1,
       players: [player],
+      hostId: player.id,
       credentials: new Map([[playerToken, player.id]]),
+      seatClientIds: clientId ? new Map([[player.id, clientId]]) : new Map(),
+      lastSeen: new Map([[player.id, Date.now()]]),
       inviteToken: randomBytes(32).toString('base64url'),
       state: game.initialState([player]),
       chat: [],
@@ -123,13 +144,47 @@ export class RoomStore {
     return { room: view, playerToken, inviteToken: room.inviteToken };
   }
 
-  joinRoom(input: { roomId: string; inviteToken: string; playerName: string; avatarUrl?: string }) {
-    const room = this.findRoom(input.roomId);
+  joinRoom(input: {
+    roomId: string;
+    inviteToken: string;
+    playerName: string;
+    avatarUrl?: string;
+    clientId?: string;
+  }) {
+    let room = this.findRoom(input.roomId);
     if (input.inviteToken !== room.inviteToken) {
       throw new RoomError('INVALID_INVITE', 'A valid room invitation is required.');
     }
+    const clientId = normalizeClientId(input.clientId);
+    const swept = this.sweepIdleSeats(room);
+    if (!swept) throw new RoomError('ROOM_NOT_FOUND', 'Room not found. Rooms are lost when the service restarts.');
+    room = swept;
+
+    if (clientId) {
+      const recovering = room.players.find((player) => room.seatClientIds.get(player.id) === clientId);
+      if (recovering) {
+        const playerToken = randomBytes(32).toString('base64url');
+        const credentials = new Map([...room.credentials].filter(([, playerId]) => playerId !== recovering.id));
+        credentials.set(playerToken, recovering.id);
+        const nextRoom: Room = {
+          ...room,
+          credentials,
+          lastSeen: new Map(room.lastSeen).set(recovering.id, Date.now()),
+          revision: room.revision + 1,
+        };
+        const view = this.view(nextRoom, recovering.id);
+        this.save(nextRoom);
+        return { room: view, playerToken, recovered: true };
+      }
+    }
+
     if (room.status === 'finished') throw new RoomError('ROOM_FINISHED', 'This game has ended.');
-    if (room.players.length >= room.game.maxPlayers) throw new RoomError('ROOM_FULL', 'This room is full.');
+    if (room.players.length >= room.game.maxPlayers) {
+      throw new RoomError(
+        'ROOM_FULL',
+        'This room has no empty seat. If you already held a seat here, call join_room again with the same clientId you joined with the first time to take it back; otherwise ask the host to release an idle seat.',
+      );
+    }
     const avatarUrl = normalizeAvatar(input.avatarUrl);
     const player: Player = {
       id: randomUUID(),
@@ -145,6 +200,8 @@ export class RoomStore {
       ...room,
       players,
       credentials: new Map([...room.credentials, [playerToken, player.id]]),
+      seatClientIds: clientId ? new Map([...room.seatClientIds, [player.id, clientId]]) : room.seatClientIds,
+      lastSeen: new Map([...room.lastSeen, [player.id, Date.now()]]),
       status: players.length >= room.game.minPlayers ? 'active' : 'waiting',
       version: room.version + 1,
       revision: room.revision + 1,
@@ -152,7 +209,7 @@ export class RoomStore {
     };
     const view = this.view(nextRoom, player.id);
     this.save(nextRoom);
-    return { room: view, playerToken };
+    return { room: view, playerToken, recovered: false };
   }
 
   getRoom(input: PlayerAccess): RoomView {
@@ -267,6 +324,87 @@ export class RoomStore {
     return view;
   }
 
+  leaveRoom(input: PlayerAccess): { roomId: string; left: true } {
+    const { room, playerId } = this.authenticate(input);
+    this.releaseSeat(room, playerId);
+    return { roomId: room.id, left: true };
+  }
+
+  kickPlayer(input: PlayerAccess & { targetPlayerId: string }): RoomView {
+    const { room, playerId } = this.authenticate(input);
+    if (playerId !== room.hostId) {
+      throw new RoomError('FORBIDDEN', 'Only the host can release another player’s seat.');
+    }
+    if (input.targetPlayerId === playerId) {
+      throw new RoomError('INVALID_TARGET', 'The host cannot remove their own seat; use leave_room instead.');
+    }
+    if (!room.players.some((player) => player.id === input.targetPlayerId)) {
+      throw new RoomError('PLAYER_NOT_FOUND', 'That seat is already empty.');
+    }
+    const nextRoom = this.withoutSeat(room, input.targetPlayerId);
+    const view = this.view(nextRoom, playerId);
+    this.save(nextRoom);
+    return view;
+  }
+
+  subscribe(input: PlayerAccess, listener: () => void): () => void {
+    const { room } = this.authenticate(input);
+    const listeners = this.waiters.get(room.id) ?? new Set<() => void>();
+    this.waiters.set(room.id, listeners);
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+      if (!listeners.size) this.waiters.delete(room.id);
+    };
+  }
+
+  private releaseSeat(room: Room, playerId: string) {
+    const nextRoom = this.withoutSeat(room, playerId);
+    if (!nextRoom.players.length) this.removeRoom(room.id);
+    else this.save(nextRoom);
+  }
+
+  private withoutSeat(room: Room, playerId: string): Room {
+    const players = room.players.filter((player) => player.id !== playerId);
+    const belowMinimum = players.length < room.game.minPlayers;
+    return {
+      ...room,
+      players,
+      hostId: room.hostId === playerId ? (players[0]?.id ?? '') : room.hostId,
+      credentials: new Map([...room.credentials].filter(([, id]) => id !== playerId)),
+      seatClientIds: new Map([...room.seatClientIds].filter(([id]) => id !== playerId)),
+      lastSeen: new Map([...room.lastSeen].filter(([id]) => id !== playerId)),
+      rematchVotes: new Set([...room.rematchVotes].filter((id) => id !== playerId)),
+      status: belowMinimum ? 'waiting' : room.status,
+      state: belowMinimum && players.length ? room.game.initialState(structuredClone(players)) : room.state,
+      version: room.version + 1,
+      revision: room.revision + 1,
+    };
+  }
+
+  private sweepIdleSeats(room: Room): Room | null {
+    const cutoff = Date.now() - this.idleSeatMs;
+    const idleIds = room.players
+      .filter((player) => (room.lastSeen.get(player.id) ?? 0) < cutoff)
+      .map((player) => player.id);
+    if (!idleIds.length) return room;
+    let nextRoom = room;
+    for (const playerId of idleIds) nextRoom = this.withoutSeat(nextRoom, playerId);
+    if (!nextRoom.players.length) {
+      this.removeRoom(room.id);
+      return null;
+    }
+    this.save(nextRoom);
+    return nextRoom;
+  }
+
+  private removeRoom(roomId: string) {
+    this.rooms.delete(roomId);
+    const listeners = this.waiters.get(roomId);
+    this.waiters.delete(roomId);
+    for (const wake of [...(listeners ?? [])]) wake();
+  }
+
   private save(room: Room) {
     const changed = this.rooms.get(room.id)?.revision !== room.revision;
     this.rooms.set(room.id, room);
@@ -284,6 +422,7 @@ export class RoomStore {
     const room = this.findRoom(input.roomId);
     const playerId = room.credentials.get(input.playerToken);
     if (!playerId) throw new RoomError('UNAUTHORIZED', 'Use the private playerToken returned when you created or joined this room.');
+    room.lastSeen.set(playerId, Date.now());
     return { room, playerId };
   }
 
@@ -295,6 +434,7 @@ export class RoomStore {
       version: room.version,
       revision: room.revision,
       players: structuredClone(room.players),
+      hostId: room.hostId,
       selfPlayerId: playerId,
       chat: structuredClone(room.chat),
       imageDrops: structuredClone(room.imageDrops),

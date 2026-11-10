@@ -17,7 +17,9 @@ export function usePlayground() {
   const expired = ref(false);
   const sending = ref(false);
   const creating = ref(false);
+  const eventsReady = ref(false);
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
+  let eventSource: EventSource | undefined;
   let disposed = false;
   let polling = false;
 
@@ -66,7 +68,33 @@ export function usePlayground() {
     polling = true;
     await refreshRoom();
     polling = false;
-    if (!disposed && canPoll.value && !document.hidden) pollTimer = setTimeout(() => { void poll(); }, 2500);
+    if (disposed || !canPoll.value || document.hidden) return;
+    pollTimer = setTimeout(() => { void poll(); }, eventsReady.value ? 12000 : 2500);
+  }
+
+  function closeEvents() {
+    eventSource?.close();
+    eventSource = undefined;
+    eventsReady.value = false;
+  }
+
+  function connectEvents() {
+    closeEvents();
+    const current = session.value;
+    if (disposed || !canPoll.value || !current || typeof EventSource === 'undefined') return;
+    const source = new EventSource(api.eventsUrl(current));
+    eventSource = source;
+    source.addEventListener('open', () => {
+      if (eventSource !== source) return;
+      eventsReady.value = true;
+      void refreshRoom();
+    });
+    source.addEventListener('update', () => {
+      if (eventSource === source) void refreshRoom();
+    });
+    source.addEventListener('error', () => {
+      if (eventSource === source) eventsReady.value = false;
+    });
   }
 
   async function createRoom(gameId: string, playerName: string, avatarUrl?: string) {
@@ -153,13 +181,43 @@ export function usePlayground() {
     }
   }
 
+  async function kick(playerId: string): Promise<boolean> {
+    if (!session.value || !room.value || sending.value) return false;
+    const current = session.value;
+    sending.value = true;
+    sendError.value = '';
+    try {
+      const snapshot = await api.kick(current, playerId);
+      if (session.value !== current) return false;
+      acceptRoom(snapshot);
+      return true;
+    } catch (error) {
+      if (session.value !== current) return false;
+      sendError.value = (error as Error).message;
+      return false;
+    } finally {
+      sending.value = false;
+    }
+  }
+
   function visibilityChanged() {
     clearTimeout(pollTimer);
-    if (!document.hidden) void poll();
+    if (document.hidden) return;
+    if (!eventsReady.value) connectEvents();
+    void poll();
   }
-  watch([page, session, expired], () => { void poll(); });
+  watch([page, session, expired], () => {
+    if (canPoll.value) {
+      connectEvents();
+      void poll();
+    } else {
+      closeEvents();
+      clearTimeout(pollTimer);
+    }
+  });
   onMounted(() => {
     void loadGames();
+    connectEvents();
     void poll();
     document.addEventListener('visibilitychange', visibilityChanged);
     window.addEventListener('online', visibilityChanged);
@@ -167,9 +225,10 @@ export function usePlayground() {
   onUnmounted(() => {
     disposed = true;
     clearTimeout(pollTimer);
+    closeEvents();
     document.removeEventListener('visibilitychange', visibilityChanged);
     window.removeEventListener('online', visibilityChanged);
   });
 
-  return { games, gamesLoading, gamesError, session, room, page, roomLoading, roomError, sendError, storageNotice, expired, sending, creating, loadGames, refreshRoom, createRoom, sendChat, place, requestRematch };
+  return { games, gamesLoading, gamesError, session, room, page, roomLoading, roomError, sendError, storageNotice, expired, sending, creating, loadGames, refreshRoom, createRoom, sendChat, place, requestRematch, kick };
 }

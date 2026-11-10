@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildInvitation, parseSession, roomErrorMessage, shouldAcceptRoom } from '../web/lib/session.ts';
+import { AGENT_CLIENT_ID, buildInvitation, parseSession, roomErrorMessage, shouldAcceptRoom } from '../web/lib/session.ts';
 
 const session = {
   roomId: '00000000-0000-4000-8000-000000000001',
@@ -14,6 +14,9 @@ test('the agent invitation shares the invitation and room but never the player c
   assert.ok(text.includes(session.roomId));
   assert.ok(text.includes(session.inviteToken));
   assert.ok(text.includes('join_room'));
+  assert.ok(text.includes(`clientId 为 ${AGENT_CLIENT_ID}`));
+  assert.match(text, /本地的文件/);
+  assert.ok(text.includes('leave_room'));
   assert.ok(text.includes('send_chat_message'));
   assert.ok(text.includes('drop_image'));
   assert.ok(text.includes('wait_for_room_update'));
