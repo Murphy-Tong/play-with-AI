@@ -139,7 +139,7 @@ test('web chat validates text and authentication without advancing revision', as
   }), 401, 'UNAUTHORIZED');
 });
 
-test('web rematch is rejected before finish and works after both votes', async (t) => {
+test('web rematch restarts immediately once both seats are filled', async (t) => {
   const finishGame: GameDefinition = {
     id: 'finish-web', title: 'Finish web', description: 'Fixture',
     minPlayers: 2, maxPlayers: 2,
@@ -153,20 +153,22 @@ test('web rematch is rejected before finish and works after both votes', async (
   const { post } = await setup(t, store);
   const created = await post('/rooms', { gameId: 'finish-web', playerName: 'Human' });
   const host = await created.json() as Created;
-  await assertError(await post(`/rooms/${host.room.id}/rematch`, {}, host.playerToken), 409, 'ROOM_NOT_FINISHED');
+  await assertError(await post(`/rooms/${host.room.id}/rematch`, {}, host.playerToken), 409, 'ROOM_NOT_READY');
   const joinedResponse = await post(`/rooms/${host.room.id}/join`, {
     inviteToken: host.inviteToken, playerName: 'Agent',
   });
   const guest = await joinedResponse.json() as ReturnType<RoomStore['joinRoom']>;
+  const midGame = await post(`/rooms/${host.room.id}/rematch`, {}, guest.playerToken);
+  assert.equal(midGame.status, 200);
+  const restartedMidGame = await midGame.json() as RoomView;
+  assert.equal(restartedMidGame.status, 'active');
+  assert.equal(restartedMidGame.state.restarted, true);
   await post(`/rooms/${host.room.id}/actions`, {
-    expectedVersion: guest.room.version, action: { type: 'finish' },
+    expectedVersion: restartedMidGame.version, action: { type: 'finish' },
   }, host.playerToken);
-  const first = await post(`/rooms/${host.room.id}/rematch`, {}, host.playerToken);
-  assert.equal(first.status, 200);
-  assert.equal((await first.json()).rematchVotes.length, 1);
-  const second = await post(`/rooms/${host.room.id}/rematch`, {}, guest.playerToken);
-  assert.equal(second.status, 200);
-  const restarted = await second.json() as RoomView;
+  const afterFinish = await post(`/rooms/${host.room.id}/rematch`, {}, host.playerToken);
+  assert.equal(afterFinish.status, 200);
+  const restarted = await afterFinish.json() as RoomView;
   assert.equal(restarted.status, 'active');
   assert.equal(restarted.state.restarted, true);
 });

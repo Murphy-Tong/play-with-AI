@@ -92,7 +92,7 @@ test('avatars are trimmed, stored, and returned for both players', () => {
   assert.equal(view.players[1]!.avatarUrl, 'https://example.test/agent.png');
 });
 
-test('a finished room restarts only after every player requests it and keeps chat', () => {
+test('a rematch restarts the room immediately and keeps chat', () => {
   const { store, host, guest } = setup(finishGame);
   store.sendChat({ roomId: host.room.id, playerToken: host.playerToken, text: 'good game' });
   const finished = store.submitAction({
@@ -100,25 +100,30 @@ test('a finished room restarts only after every player requests it and keeps cha
     expectedVersion: guest.room.version, action: { type: 'finish' },
   });
   assert.equal(finished.status, 'finished');
-  const first = store.requestRematch({ roomId: host.room.id, playerToken: host.playerToken });
-  assert.deepEqual(first.rematchVotes, [host.room.selfPlayerId]);
-  const repeated = store.requestRematch({ roomId: host.room.id, playerToken: host.playerToken });
-  assert.deepEqual(repeated.rematchVotes, [host.room.selfPlayerId]);
-  assert.equal(repeated.revision, first.revision);
-  const restarted = store.requestRematch({ roomId: host.room.id, playerToken: guest.playerToken });
+  const restarted = store.requestRematch({ roomId: host.room.id, playerToken: host.playerToken });
   assert.equal(restarted.status, 'active');
-  assert.deepEqual(restarted.rematchVotes, []);
   assert.equal(restarted.version, finished.version + 1);
+  assert.equal(restarted.revision, finished.revision + 1);
   assert.equal(restarted.state.restarted, true);
   assert.equal(restarted.chat.length, 1);
   assert.equal(restarted.chat[0]!.text, 'good game');
 });
 
-test('rematch is rejected before the game finishes', () => {
-  const { store, host } = setup(finishGame);
+test('a rematch restarts an in-progress game too', () => {
+  const { store, host, guest } = setup(finishGame);
+  assert.equal(guest.room.status, 'active');
+  const restarted = store.requestRematch({ roomId: host.room.id, playerToken: guest.playerToken });
+  assert.equal(restarted.status, 'active');
+  assert.equal(restarted.state.restarted, true);
+  assert.equal(restarted.version, guest.room.version + 1);
+});
+
+test('a rematch waits until both players are seated', () => {
+  const store = new RoomStore([finishGame]);
+  const host = store.createRoom({ gameId: 'finish-test', playerName: 'Human' });
   assert.throws(() => store.requestRematch({
     roomId: host.room.id, playerToken: host.playerToken,
-  }), { code: 'ROOM_NOT_FINISHED' });
+  }), { code: 'ROOM_NOT_READY' });
 });
 
 test('gomoku assigns creator black only when the room becomes active', () => {

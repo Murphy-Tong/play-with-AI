@@ -176,7 +176,10 @@ button svg { flex: 0 0 auto; }
 .gomoku-hit:not(:disabled):active { background: #a5b68a40; }
 .gomoku-result { position: absolute; inset: auto 0 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px; background: #fffefad9; backdrop-filter: blur(4px); }
 .gomoku-result strong { font-size: 18px; letter-spacing: .5px; }
-.rematch-count { font: 9px ui-monospace, monospace; margin-left: 5px; opacity: .7; }
+.rematch-button { font-size: 10px; color: #6f8457; padding-inline: 6px; min-height: 28px; flex-shrink: 0; }
+.rematch-confirm-text { color: #6c775e; font-size: 13px; line-height: 1.7; margin: 4px 0 20px; }
+.rematch-confirm-actions { display: flex; gap: 10px; }
+.rematch-confirm-actions .button { flex: 1; }
 .invite-inline { align-self: center; }
 .gomoku-loading { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; color: #8b977a; font-size: 12px; }
 

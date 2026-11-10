@@ -13,8 +13,7 @@ export type RoomErrorCode =
   | 'INVALID_INPUT'
   | 'INVALID_TARGET'
   | 'FORBIDDEN'
-  | 'PLAYER_NOT_FOUND'
-  | 'ROOM_NOT_FINISHED';
+  | 'PLAYER_NOT_FOUND';
 
 export class RoomError extends Error {
   readonly code: RoomErrorCode;

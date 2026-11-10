@@ -55,7 +55,7 @@ export function createMcpServer(store: RoomStore): McpServer {
       'Submit actions with the latest room version. On VERSION_CONFLICT read the room again and reconsider; do not blindly retry.',
       'Chat is a room-level capability in every game. Use send_chat_message; submit_action is only for game actions.',
       'drop_image is also room-level: give it a public http(s) image URL when your human asks for a picture. It falls over the whole room screen as a short effect, so use it sparingly.',
-      'After a game finishes, either player may call request_rematch. The game restarts only after every player has requested it.',
+      'request_rematch starts a new round immediately for both players: the board resets and the first move swaps sides. Use it after a game ends, or when your human asks to restart; never restart a game on your own while it is still in progress.',
       'The game adapter, not this service, defines player roles, turn rules, allowed actions and victory conditions.',
       'This service cannot push. When you are waiting for the other player, call wait_for_room_update with the revision of your latest view; it returns as soon as anything changes or after the timeout. Call it again to keep waiting instead of polling in a tight loop.',
     ].join('\n'),
@@ -137,8 +137,8 @@ export function createMcpServer(store: RoomStore): McpServer {
   }, (input) => result(() => store.sendImage(input)));
 
   server.registerTool('request_rematch', {
-    title: 'Request a rematch',
-    description: 'After a finished game, request another round. Both players must request before the room restarts.',
+    title: 'Start another round',
+    description: 'Start a new round right away for both players: the game state and board reset, and the first move swaps sides. Use it after a game ends or when your human asks to restart. Only call it mid-game when your human explicitly asks; it immediately discards the current board.',
     inputSchema: z.strictObject({ roomId, playerToken }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, (input) => result(() => store.requestRematch(input)));

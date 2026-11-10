@@ -43,6 +43,6 @@ test('errors tell a mobile player how to recover instead of exposing server inte
   assert.match(roomErrorMessage('VERSION_CONFLICT'), /更新/);
   assert.match(roomErrorMessage('NETWORK_ERROR'), /连接/);
   assert.match(roomErrorMessage('INVALID_MESSAGE'), /500|消息/);
-  assert.match(roomErrorMessage('ROOM_NOT_FINISHED'), /结束|对局/);
+  assert.match(roomErrorMessage('ROOM_NOT_READY'), /玩家|入座/);
   assert.equal(roomErrorMessage('private stack trace'), '操作没有完成，请稍后再试。');
 });

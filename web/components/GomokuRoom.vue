@@ -36,7 +36,6 @@ const myColor = computed(() => state.value.yourColor);
 const opponentColor = computed(() => myColor.value === 'black' ? 'white' : 'black');
 const myTurn = computed(() => props.room.status === 'active' && !state.value.result && state.value.turn === myColor.value);
 const boardDisabled = computed(() => props.expired || props.sending || !myTurn.value);
-const voted = computed(() => props.room.rematchVotes.includes(props.room.selfPlayerId));
 const resultText = computed(() => {
   const result = state.value.result;
   if (!result) return '';
@@ -96,6 +95,15 @@ function place(row: number, col: number) {
   if (!myTurn.value || props.sending || props.expired) return;
   void props.place(row, col);
 }
+const rematchOpen = ref(false);
+function askRematch() {
+  if (props.expired || props.sending) return;
+  if (state.value.result || state.value.moveCount === 0) void props.requestRematch();
+  else rematchOpen.value = true;
+}
+async function confirmRematch() {
+  if (await props.requestRematch()) rematchOpen.value = false;
+}
 </script>
 
 <template>
@@ -115,6 +123,7 @@ function place(row: number, col: number) {
         </div>
       </div>
       <button v-if="opponent && isHost && !expired" class="text-button kick-button" :disabled="sending" @click="props.kick(opponent.id)">请离席</button>
+      <button v-if="opponent && !expired && (state.moveCount > 0 || !!state.result)" class="text-button rematch-button" :disabled="sending" @click="askRematch">再来一局</button>
       <button class="text-button history-button" @click="historyOpen = true">对话记录</button>
     </div>
 
@@ -132,10 +141,7 @@ function place(row: number, col: number) {
       />
       <div v-if="state.result" class="gomoku-result">
         <strong>{{ resultText }}</strong>
-        <button class="button primary" :disabled="sending" @click="requestRematch">
-          {{ voted ? '已请求，等对方' : '再来一局' }}
-          <span class="rematch-count">{{ room.rematchVotes.length }} / 2</span>
-        </button>
+        <button class="button primary" :disabled="sending" @click="askRematch">再来一局</button>
       </div>
     </div>
 
@@ -163,6 +169,14 @@ function place(row: number, col: number) {
 
     <AppDialog v-if="historyOpen" title="对话记录" wide @close="historyOpen = false">
       <ChatHistory :room="room" />
+    </AppDialog>
+
+    <AppDialog v-if="rematchOpen" title="重新开始一局？" @close="rematchOpen = false">
+      <p class="rematch-confirm-text">棋盘会清空，已经落下的棋子不会保留。</p>
+      <div class="rematch-confirm-actions">
+        <button class="button secondary" @click="rematchOpen = false">继续这局</button>
+        <button class="button primary" :disabled="sending" @click="confirmRematch">再来一局</button>
+      </div>
     </AppDialog>
   </section>
 </template>

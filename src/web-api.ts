@@ -47,7 +47,6 @@ const roomStatus: Record<string, number> = {
   INVALID_INPUT: 400,
   INVALID_TARGET: 400,
   PLAYER_NOT_FOUND: 404,
-  ROOM_NOT_FINISHED: 409,
 };
 
 function sendError(res: express.Response, status: number, code: string, message: string) {

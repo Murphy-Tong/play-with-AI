@@ -93,6 +93,14 @@ test('gomoku draws when the board is full without five in a row', () => {
   assert.deepEqual((game.state() as { result: unknown }).result, { draw: true });
 });
 
+test('gomoku restart keeps the colors when no stone was placed yet', () => {
+  const restarted = gomokuGame.restart!(players, gomokuGame.initialState(players)) as JsonObject & {
+    blackPlayerId: string; whitePlayerId: string;
+  };
+  assert.equal(restarted.blackPlayerId, 'black-player');
+  assert.equal(restarted.whitePlayerId, 'white-player');
+});
+
 test('gomoku restart clears the board and swaps colors', () => {
   const game = setup();
   game.place(black, 7, 7);

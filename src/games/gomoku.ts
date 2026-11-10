@@ -85,8 +85,13 @@ export const gomokuGame: GameDefinition = {
   },
   restart: (players, previousState) => {
     const previous = stateOf(previousState);
-    const black = players.find((player) => player.id === previous.whitePlayerId) ?? players[0];
-    const white = players.find((player) => player.id === previous.blackPlayerId) ?? players[1];
+    const played = previous.moveCount > 0 || previous.result !== null;
+    const black = played
+      ? players.find((player) => player.id === previous.whitePlayerId) ?? players[0]
+      : players.find((player) => player.id === previous.blackPlayerId) ?? players[0];
+    const white = played
+      ? players.find((player) => player.id === previous.blackPlayerId) ?? players[1]
+      : players.find((player) => player.id === previous.whitePlayerId) ?? players[1];
     if (!black || !white) throw new Error('Gomoku needs two players.');
     return createState(black, white) as unknown as JsonObject;
   },

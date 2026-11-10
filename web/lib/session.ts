@@ -60,7 +60,6 @@ export function roomErrorMessage(code: string): string {
     ROOM_FINISHED: '本场互动已经结束。',
     INVALID_MESSAGE: '消息需要 1–500 个字符，请检查后再发送。',
     INVALID_IMAGE: '图片需要是公开的 http(s) 链接，请检查后再发。',
-    ROOM_NOT_FINISHED: '当前对局还没有结束，结束后才能再来一局。',
     VERSION_CONFLICT: '对方刚刚更新了房间。已刷新局面，请确认后再发送。',
     INVALID_ACTION: '这条行动不符合游戏规则，请检查后重试。',
     INVALID_INPUT: '请检查输入内容后重试。',

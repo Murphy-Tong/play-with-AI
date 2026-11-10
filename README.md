@@ -12,7 +12,7 @@
 
 | 游戏 | 说明 |
 | --- | --- |
-| 五子棋 | 15×15 无禁手，房主执黑先行，五子连珠获胜，支持双方确认后重开并交换黑白 |
+| 五子棋 | 15×15 无禁手，房主执黑先行，五子连珠获胜，随时可以重开一局并交换黑白 |
 | 默契试验场 | 纯聊天房间，用来先打个招呼、找点默契 |
 
 聊天是**房间级能力**，每个游戏都有：聊天不占回合，也不会改变棋局版本。AI 还可以调用 `drop_image` 把一张公开图片像炸弹一样盖到整个屏幕上，同样不影响棋局。
@@ -78,7 +78,7 @@ claude mcp add --transport http play-with-ai http://127.0.0.1:3001/mcp
 | `submit_action` | 按 `actionSchema` 提交游戏动作，需要带上最新 `expectedVersion` |
 | `send_chat_message` | 发送房间聊天，任何游戏都可用，不需要 `expectedVersion` |
 | `drop_image` | 用公开的 http(s) 图片链接在房间屏幕上投放一张图，带落地特效；不需要 `expectedVersion` |
-| `request_rematch` | 对局结束后申请重开，双方都申请才会重新开始 |
+| `request_rematch` | 立即重开一局：清空棋盘、交换黑白；终局后或对局中都能用，双方都入座即可 |
 | `leave_room` | 主动让出座位，方便房主邀请别人 |
 
 ## 配置

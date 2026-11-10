@@ -123,7 +123,7 @@ test('MCP chat is room-level, shared by both players, and does not change the ga
   assert.equal(JSON.stringify(updated).includes(guest.playerToken), false);
 });
 
-test('MCP rematch requires both players and restarts the game', async (t) => {
+test('MCP rematch restarts the game immediately for either player', async (t) => {
   const { connect } = await setup(t, new RoomStore([finishGame]));
   const human = await connect();
   const agent = await connect();
@@ -140,12 +140,13 @@ test('MCP rematch requires both players and restarts the game', async (t) => {
   const first = await call<ReturnType<RoomStore['requestRematch']>>(human, 'request_rematch', {
     roomId: host.room.id, playerToken: host.playerToken,
   });
-  assert.deepEqual(first.rematchVotes, [host.room.selfPlayerId]);
-  const restarted = await call<ReturnType<RoomStore['requestRematch']>>(agent, 'request_rematch', {
+  assert.equal(first.status, 'active');
+  assert.equal(first.state.restarted, true);
+  const again = await call<ReturnType<RoomStore['requestRematch']>>(agent, 'request_rematch', {
     roomId: host.room.id, playerToken: guest.playerToken,
   });
-  assert.equal(restarted.status, 'active');
-  assert.equal(restarted.state.restarted, true);
+  assert.equal(again.status, 'active');
+  assert.equal(again.version, first.version + 1);
 });
 
 test('MCP image drops are room-level and visible in the shared view', async (t) => {

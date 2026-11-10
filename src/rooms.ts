@@ -38,7 +38,6 @@ export type RoomView = {
   state: JsonObject;
   chat: ChatMessage[];
   imageDrops: ImageDrop[];
-  rematchVotes: string[];
 };
 
 type Room = {
@@ -56,7 +55,6 @@ type Room = {
   state: JsonObject;
   chat: ChatMessage[];
   imageDrops: ImageDrop[];
-  rematchVotes: Set<string>;
 };
 
 type PlayerAccess = { roomId: string; playerToken: string };
@@ -137,7 +135,6 @@ export class RoomStore {
       state: game.initialState([player]),
       chat: [],
       imageDrops: [],
-      rematchVotes: new Set(),
     };
     const view = this.view(room, player.id);
     this.save(room);
@@ -300,25 +297,19 @@ export class RoomStore {
 
   requestRematch(input: PlayerAccess): RoomView {
     const { room, playerId } = this.authenticate(input);
-    if (room.status !== 'finished') {
-      throw new RoomError('ROOM_NOT_FINISHED', 'Finish the current game before requesting a rematch.');
+    if (room.players.length < room.game.minPlayers) {
+      throw new RoomError('ROOM_NOT_READY', 'Wait for both players to take their seats before starting another round.');
     }
-    if (room.rematchVotes.has(playerId)) return this.view(room, playerId);
-    const votes = new Set([...room.rematchVotes, playerId]);
-    const everyoneVoted = votes.size >= room.players.length;
-    const nextRoom: Room = everyoneVoted
-      ? {
-          ...room,
-          state: room.game.restart?.(
-            structuredClone(room.players),
-            structuredClone(room.state),
-          ) ?? room.game.initialState(structuredClone(room.players)),
-          status: 'active',
-          version: room.version + 1,
-          revision: room.revision + 1,
-          rematchVotes: new Set(),
-        }
-      : { ...room, revision: room.revision + 1, rematchVotes: votes };
+    const nextRoom: Room = {
+      ...room,
+      state: room.game.restart?.(
+        structuredClone(room.players),
+        structuredClone(room.state),
+      ) ?? room.game.initialState(structuredClone(room.players)),
+      status: 'active',
+      version: room.version + 1,
+      revision: room.revision + 1,
+    };
     const view = this.view(nextRoom, playerId);
     this.save(nextRoom);
     return view;
@@ -374,7 +365,6 @@ export class RoomStore {
       credentials: new Map([...room.credentials].filter(([, id]) => id !== playerId)),
       seatClientIds: new Map([...room.seatClientIds].filter(([id]) => id !== playerId)),
       lastSeen: new Map([...room.lastSeen].filter(([id]) => id !== playerId)),
-      rematchVotes: new Set([...room.rematchVotes].filter((id) => id !== playerId)),
       status: belowMinimum ? 'waiting' : room.status,
       state: belowMinimum && players.length ? room.game.initialState(structuredClone(players)) : room.state,
       version: room.version + 1,
@@ -438,7 +428,6 @@ export class RoomStore {
       selfPlayerId: playerId,
       chat: structuredClone(room.chat),
       imageDrops: structuredClone(room.imageDrops),
-      rematchVotes: [...room.rematchVotes],
       state: structuredClone(room.game.getPlayerView(structuredClone(room.state), {
         playerId,
         players: structuredClone(room.players),
