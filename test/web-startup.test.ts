@@ -34,7 +34,7 @@ test('development entry serves Vue and Web API on the same origin without exposi
   assert.equal(module.status, 200);
   const games = await fetch(`${origin}/api/games`);
   assert.equal(games.status, 200);
-  assert.equal((await games.json()).games[0].id, 'sandbox');
+  assert.equal((await games.json()).games[0].id, 'gomoku');
   const missing = await fetch(`${origin}/api/missing`);
   assert.equal(missing.status, 404);
   assert.match(missing.headers.get('content-type')!, /application\/json/);

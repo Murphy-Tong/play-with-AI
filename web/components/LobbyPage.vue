@@ -44,17 +44,25 @@ const emit = defineEmits<{ create: [game: GameInfo]; resume: []; guide: []; retr
       <div v-else-if="!games.length" class="loading-card">还没有开放的体验，稍后再来看看。</div>
       <div v-else class="playground-grid">
         <article v-for="game in games" :key="game.id" class="game-card">
-          <div class="card-art" aria-hidden="true">
+          <div v-if="game.id === 'gomoku'" class="card-art gomoku-art" aria-hidden="true">
+            <div class="mini-gomoku">
+              <span v-for="index in 49" :key="index" class="mini-cell" :class="{ 'mini-stone': [9, 15, 17, 23, 25, 31, 33, 39].includes(index) }"></span>
+            </div>
+            <span class="art-coordinate">01 / GOMOKU</span><span class="art-corner">↗</span>
+          </div>
+          <div v-else class="card-art" aria-hidden="true">
             <div class="card-art-grid"></div>
             <div class="chat-tile tile-back"><AppIcon name="spark" :size="32" /><span class="tile-line"></span><span class="tile-line short"></span></div>
             <div class="chat-tile tile-front"><span class="little-face"><i></i><i></i></span><div class="mini-bubbles"><b></b><b></b><b></b></div></div>
-            <span class="art-coordinate">01 / SANDBOX</span><span class="art-corner">↗</span>
+            <span class="art-coordinate">02 / SANDBOX</span><span class="art-corner">↗</span>
           </div>
           <div class="game-card-content">
-            <div class="card-title-row"><h3>{{ game.id === 'sandbox' ? '默契试验场' : game.title }}</h3><span class="badge">开放体验</span></div>
-            <p>{{ game.id === 'sandbox' ? '先打个招呼，再找点默契。和你的 AI 在同一个房间里，交换第一条消息。' : game.description }}</p>
-            <div class="game-tags"><span><AppIcon name="users" :size="15" /> {{ game.maxPlayers }} 位玩家</span><span><AppIcon name="link" :size="15" /> MCP 接入</span><span>无固定回合</span></div>
-            <div class="card-bottom"><span>协议沙盒 · 不计输赢</span><button class="button primary" @click="emit('create', game)">创建房间 <AppIcon name="arrow" :size="18" /></button></div>
+            <div class="card-title-row"><h3>{{ game.id === 'gomoku' ? '五子棋' : '默契试验场' }}</h3><span class="badge">开放体验</span></div>
+            <p>{{ game.id === 'gomoku'
+              ? '15×15 无禁手。创建者执黑先行，边下边聊，先连成五子者获胜。'
+              : '先打个招呼，再找点默契。和你的 AI 在同一个房间里自由聊天。' }}</p>
+            <div class="game-tags"><span><AppIcon name="users" :size="15" /> {{ game.maxPlayers }} 位玩家</span><span><AppIcon name="link" :size="15" /> MCP 接入</span><span>{{ game.id === 'gomoku' ? '轮流落子' : '自由聊天' }}</span></div>
+            <div class="card-bottom"><span>{{ game.id === 'gomoku' ? '15×15 · 五子连珠' : '无固定回合 · 不计输赢' }}</span><button class="button primary" @click="emit('create', game)">创建房间 <AppIcon name="arrow" :size="18" /></button></div>
           </div>
         </article>
         <aside class="how-card">

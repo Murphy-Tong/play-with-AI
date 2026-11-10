@@ -5,9 +5,26 @@ import { RoomStore } from '../src/rooms.ts';
 import { sandboxGame } from '../src/games/sandbox.ts';
 import type { GameDefinition, JsonObject } from '../src/game.ts';
 
+const actionGame: GameDefinition = {
+  id: 'action-test', title: 'Action test', description: 'Fixture',
+  minPlayers: 2, maxPlayers: 2,
+  actionSchema: z.strictObject({ type: z.literal('message'), text: z.string().trim().min(1).max(2000) }),
+  initialState: () => ({ messages: [] }),
+  getPlayerView: (state) => state,
+  applyAction: (state, context, action) => ({
+    state: {
+      messages: [
+        ...(state.messages as { playerId: string; text: string }[]),
+        { playerId: context.playerId, text: action.text as string },
+      ].slice(-50),
+    },
+    finished: false,
+  }),
+};
+
 function setup() {
-  const store = new RoomStore([sandboxGame]);
-  const host = store.createRoom({ gameId: 'sandbox', playerName: 'Human' });
+  const store = new RoomStore([actionGame]);
+  const host = store.createRoom({ gameId: actionGame.id, playerName: 'Human' });
   return { store, host };
 }
 
@@ -59,7 +76,7 @@ test('joining a full room is rejected', () => {
 
 test('player credentials are required and scoped to one room', () => {
   const { store, host } = setup();
-  const other = store.createRoom({ gameId: 'sandbox', playerName: 'Other' });
+  const other = store.createRoom({ gameId: actionGame.id, playerName: 'Other' });
   for (const playerToken of [host.inviteToken, other.playerToken, 'wrong']) {
     assert.throws(() => store.getRoom({ roomId: host.room.id, playerToken }), { code: 'UNAUTHORIZED' });
   }
@@ -160,7 +177,7 @@ test('game adapters project private views and control completion without a fixed
 
 test('a rejected game transition cannot partially mutate room state', () => {
   const game: GameDefinition = {
-    ...sandboxGame,
+    ...actionGame,
     applyAction: (state) => {
       state.messages = ['corrupted'];
       throw new Error('adapter failed');
@@ -181,7 +198,7 @@ test('a rejected game transition cannot partially mutate room state', () => {
 test('failed join projections leave the seat and version unchanged so joining can be retried', () => {
   let projectionFails = true;
   const game: GameDefinition = {
-    ...sandboxGame,
+    ...actionGame,
     getPlayerView: (state, context) => {
       if (projectionFails && context.playerId !== context.players[0]?.id) {
         throw new Error('projection failed');
@@ -205,7 +222,7 @@ test('failed join projections leave the seat and version unchanged so joining ca
 test('failed action projections do not commit the new game state', () => {
   let projectionFails = true;
   const game: GameDefinition = {
-    ...sandboxGame,
+    ...actionGame,
     getPlayerView: (state) => {
       if (projectionFails && (state.messages as unknown[]).length > 0) {
         throw new Error('projection failed');
@@ -234,7 +251,7 @@ test('unknown games and unknown rooms return explicit errors', () => {
   assert.throws(() => store.getRoom({ roomId: 'missing', playerToken: 'missing' }), { code: 'ROOM_NOT_FOUND' });
 });
 
-test('sandbox history stays bounded while accepting later messages', () => {
+test('action history stays bounded while accepting later messages', () => {
   const { store, host } = setup();
   join(store, host);
   for (let i = 0; i < 55; i += 1) {
@@ -246,4 +263,14 @@ test('sandbox history stays bounded while accepting later messages', () => {
   const messages = store.getRoom({ roomId: host.room.id, playerToken: host.playerToken }).state.messages as unknown[];
   assert.equal(messages.length, 50);
   assert.deepEqual(messages.at(-1), { playerId: host.room.selfPlayerId, text: 'message 54' });
+});
+
+test('sandbox is chat-only and cannot accept game actions', () => {
+  const store = new RoomStore([sandboxGame]);
+  const host = store.createRoom({ gameId: 'sandbox', playerName: 'Human' });
+  store.joinRoom({ roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent' });
+  assert.throws(() => store.submitAction({
+    roomId: host.room.id, playerToken: host.playerToken,
+    expectedVersion: 2, action: { type: 'message', text: 'legacy' },
+  }), { code: 'INVALID_ACTION' });
 });

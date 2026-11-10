@@ -5,10 +5,12 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import * as z from 'zod';
 import { createApp } from '../src/http.ts';
 import { RoomStore } from '../src/rooms.ts';
 import type { RoomView } from '../src/rooms.ts';
 import { sandboxGame } from '../src/games/sandbox.ts';
+import type { GameDefinition } from '../src/game.ts';
 
 const authToken = 'test-only-web-mcp-server-token-1234567890';
 type Created = ReturnType<RoomStore['createRoom']>;
@@ -42,7 +44,7 @@ async function assertError(response: Response, status: number, code: string) {
   assert.equal((await response.json()).error.code, code);
 }
 
-test('web games and MCP actions share the same room without exposing the server credential', async (t) => {
+test('web games and MCP chat share the same room without exposing the server credential', async (t) => {
   const { base, create, post } = await setup(t);
   const games = await fetch(`${base}/api/games`);
   assert.equal(games.status, 200);
@@ -61,24 +63,94 @@ test('web games and MCP actions share the same room without exposing the server 
   } });
   assert.notEqual(joined.isError, true);
   const guest = joined.structuredContent as ReturnType<RoomStore['joinRoom']>;
-  const sent = await post(`/rooms/${host.room.id}/actions`, {
-    expectedVersion: 2, action: { type: 'message', text: 'Hello from the browser' },
-  }, host.playerToken);
+  const sent = await post(`/rooms/${host.room.id}/chat`, { text: 'Hello from the browser' }, host.playerToken);
   assert.equal(sent.status, 200);
-  const action = await client.callTool({ name: 'submit_action', arguments: {
-    roomId: host.room.id, playerToken: guest.playerToken, expectedVersion: 3,
-    action: { type: 'message', text: 'Hello from MCP' },
+  const action = await client.callTool({ name: 'send_chat_message', arguments: {
+    roomId: host.room.id, playerToken: guest.playerToken, text: 'Hello from MCP',
   } });
   assert.notEqual(action.isError, true);
   const response = await fetch(`${base}/api/rooms/${host.room.id}`, { headers: { Authorization: `Bearer ${host.playerToken}` } });
   const room = await response.json() as RoomView;
-  assert.equal(room.version, 4);
+  assert.equal(room.version, 2);
   assert.equal(room.selfPlayerId, host.room.selfPlayerId);
-  assert.deepEqual(room.state.messages, [
-    { playerId: host.room.selfPlayerId, text: 'Hello from the browser' },
-    { playerId: guest.room.selfPlayerId, text: 'Hello from MCP' },
-  ]);
+  assert.deepEqual(room.chat.map((message) => message.text), ['Hello from the browser', 'Hello from MCP']);
   assert.equal(JSON.stringify(room).includes(guest.playerToken), false);
+});
+
+test('web and MCP chat share the same room and never change the game version', async (t) => {
+  const { base, create, post } = await setup(t);
+  const host = await create();
+  const client = new Client({ name: 'chat-agent', version: '1.0.0' });
+  t.after(() => client.close());
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+    requestInit: { headers: { Authorization: `Bearer ${authToken}` } },
+  }));
+  const joined = await client.callTool({ name: 'join_room', arguments: {
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent',
+  } });
+  const guest = joined.structuredContent as ReturnType<RoomStore['joinRoom']>;
+  const browserChat = await post(`/rooms/${host.room.id}/chat`, { text: '  浏览器发来一句  ' }, host.playerToken);
+  assert.equal(browserChat.status, 200);
+  const agentChat = await client.callTool({ name: 'send_chat_message', arguments: {
+    roomId: host.room.id, playerToken: guest.playerToken, text: 'Agent 也来了',
+  } });
+  assert.notEqual(agentChat.isError, true);
+  const room = await (await fetch(`${base}/api/rooms/${host.room.id}`, {
+    headers: { Authorization: `Bearer ${host.playerToken}` },
+  })).json() as RoomView;
+  assert.equal(room.version, 2);
+  assert.deepEqual(room.chat.map((message) => message.text), ['浏览器发来一句', 'Agent 也来了']);
+  assert.equal(JSON.stringify(room).includes(guest.playerToken), false);
+});
+
+test('web chat validates text and authentication without advancing revision', async (t) => {
+  const { base, create, post } = await setup(t);
+  const host = await create();
+  for (const text of ['', '   ', 'x'.repeat(501)]) {
+    const response = await post(`/rooms/${host.room.id}/chat`, { text }, host.playerToken);
+    if (text.trim() === '') {
+      await assertError(response, 400, 'INVALID_MESSAGE');
+    } else {
+      await assertError(response, 400, 'INVALID_INPUT');
+    }
+  }
+  await assertError(await post(`/rooms/${host.room.id}/chat`, { text: 'hi', extra: true }, host.playerToken), 400, 'INVALID_INPUT');
+  await assertError(await fetch(`${base}/api/rooms/${host.room.id}/chat`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: 'hi' }),
+  }), 401, 'UNAUTHORIZED');
+});
+
+test('web rematch is rejected before finish and works after both votes', async (t) => {
+  const finishGame: GameDefinition = {
+    id: 'finish-web', title: 'Finish web', description: 'Fixture',
+    minPlayers: 2, maxPlayers: 2,
+    actionSchema: z.strictObject({ type: z.literal('finish') }),
+    initialState: () => ({ done: false }),
+    getPlayerView: (state) => state,
+    applyAction: () => ({ state: { done: true }, finished: true }),
+    restart: () => ({ done: false, restarted: true }),
+  };
+  const store = new RoomStore([finishGame]);
+  const { post } = await setup(t, store);
+  const created = await post('/rooms', { gameId: 'finish-web', playerName: 'Human' });
+  const host = await created.json() as Created;
+  await assertError(await post(`/rooms/${host.room.id}/rematch`, {}, host.playerToken), 409, 'ROOM_NOT_FINISHED');
+  const joinedResponse = await post(`/rooms/${host.room.id}/join`, {
+    inviteToken: host.inviteToken, playerName: 'Agent',
+  });
+  const guest = await joinedResponse.json() as ReturnType<RoomStore['joinRoom']>;
+  await post(`/rooms/${host.room.id}/actions`, {
+    expectedVersion: guest.room.version, action: { type: 'finish' },
+  }, host.playerToken);
+  const first = await post(`/rooms/${host.room.id}/rematch`, {}, host.playerToken);
+  assert.equal(first.status, 200);
+  assert.equal((await first.json()).rematchVotes.length, 1);
+  const second = await post(`/rooms/${host.room.id}/rematch`, {}, guest.playerToken);
+  assert.equal(second.status, 200);
+  const restarted = await second.json() as RoomView;
+  assert.equal(restarted.status, 'active');
+  assert.equal(restarted.state.restarted, true);
 });
 
 test('web room access requires a private player token rather than an invitation or MCP credential', async (t) => {

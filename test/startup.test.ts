@@ -34,7 +34,7 @@ test('entrypoint starts on loopback and prints a usable generated MCP credential
   await client.connect(new StreamableHTTPClientTransport(new URL(config.url), {
     requestInit: { headers: { Authorization: config.authorization } },
   }));
-  assert.equal((await client.listTools()).tools.length, 5);
+  assert.equal((await client.listTools()).tools.length, 7);
 });
 
 test('entrypoint rejects invalid environment values without echoing secrets', async () => {

@@ -7,7 +7,9 @@ export type RoomErrorCode =
   | 'ROOM_NOT_READY'
   | 'ROOM_FINISHED'
   | 'VERSION_CONFLICT'
-  | 'INVALID_ACTION';
+  | 'INVALID_ACTION'
+  | 'INVALID_MESSAGE'
+  | 'ROOM_NOT_FINISHED';
 
 export class RoomError extends Error {
   readonly code: RoomErrorCode;

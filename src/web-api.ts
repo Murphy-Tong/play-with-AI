@@ -11,18 +11,22 @@ class AuthError extends Error {}
 const roomIdSchema = z.uuid();
 const playerNameSchema = z.string().trim().min(1).max(40);
 const tokenSchema = z.string().min(1).max(256);
+const avatarUrlSchema = z.string().trim().max(500).optional();
 const createSchema = z.strictObject({
   gameId: z.string().trim().min(1).max(64),
   playerName: playerNameSchema,
+  avatarUrl: avatarUrlSchema,
 });
 const joinSchema = z.strictObject({
   inviteToken: tokenSchema,
   playerName: playerNameSchema,
+  avatarUrl: avatarUrlSchema,
 });
 const actionSchema = z.strictObject({
   expectedVersion: z.number().int().min(1),
   action: z.record(z.string(), z.unknown()),
 });
+const chatSchema = z.strictObject({ text: z.string().max(500) });
 
 const roomStatus: Record<string, number> = {
   GAME_NOT_FOUND: 404,
@@ -34,6 +38,8 @@ const roomStatus: Record<string, number> = {
   ROOM_FINISHED: 409,
   VERSION_CONFLICT: 409,
   INVALID_ACTION: 400,
+  INVALID_MESSAGE: 400,
+  ROOM_NOT_FINISHED: 409,
 };
 
 function sendError(res: express.Response, status: number, code: string, message: string) {
@@ -114,6 +120,20 @@ export function createWebApi(store: RoomStore): Router {
       playerToken,
       expectedVersion: body.expectedVersion,
       action: body.action as JsonObject,
+    }));
+  });
+
+  router.post('/rooms/:roomId/chat', requireJson, ...jsonBody, (req, res) => {
+    const roomId = parseRoomId(req.params.roomId);
+    const playerToken = bearer(req);
+    const body = parse(chatSchema, req.body);
+    res.json(store.sendChat({ roomId, playerToken, text: body.text }));
+  });
+
+  router.post('/rooms/:roomId/rematch', (req, res) => {
+    res.json(store.requestRematch({
+      roomId: parseRoomId(req.params.roomId),
+      playerToken: bearer(req),
     }));
   });
 

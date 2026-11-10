@@ -36,14 +36,23 @@ async function request<T>(path: string, options: { method?: string; body?: unkno
 
 export const api = {
   games: () => request<{ games: GameInfo[] }>('/games'),
-  createRoom: (gameId: string, playerName: string) => request<RoomCreated>('/rooms', {
-    method: 'POST', body: { gameId, playerName },
+  createRoom: (gameId: string, playerName: string, avatarUrl?: string) => request<RoomCreated>('/rooms', {
+    method: 'POST',
+    body: { gameId, playerName, ...(avatarUrl ? { avatarUrl } : {}) },
   }),
   room: (session: RoomSession) => request<RoomView>(`/rooms/${encodeURIComponent(session.roomId)}`, {
     playerToken: session.playerToken,
   }),
-  send: (session: RoomSession, expectedVersion: number, text: string) => request<RoomView>(`/rooms/${encodeURIComponent(session.roomId)}/actions`, {
-    method: 'POST', playerToken: session.playerToken,
-    body: { expectedVersion, action: { type: 'message', text } },
-  }),
+  action: (session: RoomSession, expectedVersion: number, action: Record<string, unknown>) => request<RoomView>(
+    `/rooms/${encodeURIComponent(session.roomId)}/actions`,
+    { method: 'POST', playerToken: session.playerToken, body: { expectedVersion, action } },
+  ),
+  chat: (session: RoomSession, text: string) => request<RoomView>(
+    `/rooms/${encodeURIComponent(session.roomId)}/chat`,
+    { method: 'POST', playerToken: session.playerToken, body: { text } },
+  ),
+  rematch: (session: RoomSession) => request<RoomView>(
+    `/rooms/${encodeURIComponent(session.roomId)}/rematch`,
+    { method: 'POST', playerToken: session.playerToken },
+  ),
 };

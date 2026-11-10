@@ -6,6 +6,7 @@ import express from 'express';
 import * as z from 'zod';
 import { createApp } from './http.ts';
 import { RoomStore } from './rooms.ts';
+import { gomokuGame } from './games/gomoku.ts';
 import { sandboxGame } from './games/sandbox.ts';
 
 const config = z.object({
@@ -24,7 +25,7 @@ if (!config.success) {
   ) : [];
   const host = lan ? '0.0.0.0' : '127.0.0.1';
   const authToken = config.data.MCP_AUTH_TOKEN ?? randomBytes(32).toString('base64url');
-  const app = createApp({ authToken, store: new RoomStore([sandboxGame]), webHosts });
+  const app = createApp({ authToken, store: new RoomStore([gomokuGame, sandboxGame]), webHosts });
   const server = createServer(app);
   let closeVite: (() => Promise<void>) | undefined;
 

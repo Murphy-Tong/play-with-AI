@@ -5,13 +5,26 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import * as z from 'zod';
 import { createApp } from '../src/http.ts';
 import { RoomStore } from '../src/rooms.ts';
 import { sandboxGame } from '../src/games/sandbox.ts';
+import { gomokuGame } from '../src/games/gomoku.ts';
+import type { GameDefinition } from '../src/game.ts';
 
 const authToken = 'test-only-server-token-not-a-real-secret-123456';
 
-async function setup(t: TestContext, store = new RoomStore([sandboxGame])) {
+const finishGame: GameDefinition = {
+  id: 'finish-test', title: 'Finish test', description: 'Fixture',
+  minPlayers: 2, maxPlayers: 2,
+  actionSchema: z.strictObject({ type: z.literal('finish') }),
+  initialState: () => ({ done: false }),
+  getPlayerView: (state) => state,
+  applyAction: () => ({ state: { done: true }, finished: true }),
+  restart: () => ({ done: false, restarted: true }),
+};
+
+async function setup(t: TestContext, store = new RoomStore([sandboxGame, gomokuGame])) {
   const server = createServer(createApp({ authToken, store }));
   const clients: Client[] = [];
   server.listen(0, '127.0.0.1');
@@ -57,15 +70,18 @@ test('MCP advertises discoverable game schemas and the room tools', async (t) =>
   const client = await connect();
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
-    'create_room', 'get_room', 'join_room', 'list_games', 'submit_action',
+    'create_room', 'get_room', 'join_room', 'list_games',
+    'request_rematch', 'send_chat_message', 'submit_action',
   ]);
   assert.equal(tools.tools.find((tool) => tool.name === 'get_room')?.annotations?.readOnlyHint, true);
-  const { games } = await call<{ games: { id: string; actionSchema: { required: string[] } }[] }>(client, 'list_games');
-  assert.equal(games[0]?.id, 'sandbox');
-  assert.deepEqual(games[0]?.actionSchema.required, ['type', 'text']);
+  const { games } = await call<{ games: { id: string; actionSchema: { required: string[] } | null }[] }>(client, 'list_games');
+  const sandbox = games.find((game) => game.id === 'sandbox');
+  const gomoku = games.find((game) => game.id === 'gomoku');
+  assert.equal(sandbox?.actionSchema, null);
+  assert.deepEqual(gomoku?.actionSchema?.required, ['type', 'row', 'col']);
 });
 
-test('two independent HTTP MCP clients share a complete room/action flow', async (t) => {
+test('two independent HTTP MCP clients share a complete room/chat flow', async (t) => {
   const { connect } = await setup(t);
   const human = await connect();
   const agent = await connect();
@@ -75,23 +91,65 @@ test('two independent HTTP MCP clients share a complete room/action flow', async
   const guest = await call<ReturnType<RoomStore['joinRoom']>>(agent, 'join_room', {
     roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent',
   });
-  const room = await call<ReturnType<RoomStore['getRoom']>>(human, 'get_room', {
-    roomId: host.room.id, playerToken: host.playerToken,
-  });
-  assert.equal(room.status, 'active');
-  assert.equal(room.version, 2);
-  await call(agent, 'submit_action', {
-    roomId: host.room.id, playerToken: guest.playerToken, expectedVersion: 2,
-    action: { type: 'message', text: 'I joined through MCP' },
+  await call(agent, 'send_chat_message', {
+    roomId: host.room.id, playerToken: guest.playerToken, text: 'I joined through MCP',
   });
   const updated = await call<ReturnType<RoomStore['getRoom']>>(human, 'get_room', {
     roomId: host.room.id, playerToken: host.playerToken,
   });
-  assert.equal(updated.version, 3);
-  assert.deepEqual(updated.state.messages, [
-    { playerId: guest.room.selfPlayerId, text: 'I joined through MCP' },
-  ]);
+  assert.equal(updated.version, 2);
+  assert.deepEqual(updated.chat.map((message) => message.text), ['I joined through MCP']);
   assert.equal(JSON.stringify(updated).includes(guest.playerToken), false);
+});
+
+test('MCP chat is room-level, shared by both players, and does not change the game version', async (t) => {
+  const { connect } = await setup(t);
+  const human = await connect();
+  const agent = await connect();
+  const host = await call<ReturnType<RoomStore['createRoom']>>(human, 'create_room', {
+    gameId: 'sandbox', playerName: 'Human', avatarUrl: 'https://example.test/me.png',
+  });
+  const guest = await call<ReturnType<RoomStore['joinRoom']>>(agent, 'join_room', {
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent',
+    avatarUrl: 'https://example.test/agent.png',
+  });
+  await call(agent, 'send_chat_message', {
+    roomId: host.room.id, playerToken: guest.playerToken, text: '  我先说一句  ',
+  });
+  const updated = await call<ReturnType<RoomStore['getRoom']>>(human, 'get_room', {
+    roomId: host.room.id, playerToken: host.playerToken,
+  });
+  assert.equal(updated.version, 2);
+  assert.equal(updated.chat.length, 1);
+  assert.equal(updated.chat[0]!.text, '我先说一句');
+  assert.equal(updated.players[0]!.avatarUrl, 'https://example.test/me.png');
+  assert.equal(updated.players[1]!.avatarUrl, 'https://example.test/agent.png');
+  assert.equal(JSON.stringify(updated).includes(guest.playerToken), false);
+});
+
+test('MCP rematch requires both players and restarts the game', async (t) => {
+  const { connect } = await setup(t, new RoomStore([finishGame]));
+  const human = await connect();
+  const agent = await connect();
+  const host = await call<ReturnType<RoomStore['createRoom']>>(human, 'create_room', {
+    gameId: 'finish-test', playerName: 'Human',
+  });
+  const guest = await call<ReturnType<RoomStore['joinRoom']>>(agent, 'join_room', {
+    roomId: host.room.id, inviteToken: host.inviteToken, playerName: 'Agent',
+  });
+  await call(human, 'submit_action', {
+    roomId: host.room.id, playerToken: host.playerToken,
+    expectedVersion: guest.room.version, action: { type: 'finish' },
+  });
+  const first = await call<ReturnType<RoomStore['requestRematch']>>(human, 'request_rematch', {
+    roomId: host.room.id, playerToken: host.playerToken,
+  });
+  assert.deepEqual(first.rematchVotes, [host.room.selfPlayerId]);
+  const restarted = await call<ReturnType<RoomStore['requestRematch']>>(agent, 'request_rematch', {
+    roomId: host.room.id, playerToken: guest.playerToken,
+  });
+  assert.equal(restarted.status, 'active');
+  assert.equal(restarted.state.restarted, true);
 });
 
 test('MCP domain errors are structured and stale actions cannot be replayed', async (t) => {
@@ -131,6 +189,8 @@ test('MCP validates tool inputs instead of accepting blank names or extra author
 test('internal adapter exceptions are not exposed to an MCP client', async (t) => {
   const store = new RoomStore([{
     ...sandboxGame,
+    id: 'sandbox',
+    actionSchema: z.strictObject({ type: z.literal('message'), text: z.string() }),
     applyAction: () => { throw new Error('private-server-secret'); },
   }]);
   const { connect } = await setup(t, store);
